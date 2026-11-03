@@ -190,10 +190,13 @@ Add its name to `pipeline:` in config. For reversible redaction, use
   every raster image embedded in the page is inspected and masked.
 - Scanned PDFs: rasterized, then treated as images.
 - Office docs (OOXML `.docx`/`.pptx`/`.xlsx`, incl. SharePoint exports):
-  the archive is unzipped, every image under `*/media/` is inspected and
-  masked, the rest is repacked verbatim. **Document body text is not
-  redacted inside Office files yet** — only their images. Convert to PDF
-  first if you need the text scrubbed too.
+  body **text** in `<w:t>`/`<a:t>`/`<t>` nodes is tokenized reversibly
+  (by the anonymizer, same tokens as plain text — so the model's reply
+  restores), and every image under `*/media/` is inspected and masked
+  (by image_redactor). All other bytes (namespaces, formatting,
+  relationships) are preserved. Limit: an entity split across multiple
+  runs (separate `<w:t>` nodes) is detected but only masked if it sits in
+  one node — reflow the source or convert to PDF for such cases.
 - `image_redactor.max_pages` caps work per PDF.
 - One-way: nothing about a masked region is restorable.
 
