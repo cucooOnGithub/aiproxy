@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from aiproxy.document import Document, PartKind
 from aiproxy.llm.ollama_ner import Entity, build_ner
+from aiproxy.metrics import METRICS
 from aiproxy.pipeline.base import Processor, SessionContext
 from aiproxy.processors.tokens import TOKEN_RE, make_token
 
@@ -73,6 +74,8 @@ class Anonymizer(Processor):
             if token is None:
                 token = make_token(ent.type, self._seq(ctx))
                 ctx.store.put(ctx.session_id, token, ent.text, ent.type)
+                METRICS.inc("tokens_created")
+            METRICS.inc(f"entity:{ent.type}")
             replacement = "[REDACTED]" if action == "redact" else token
             text = text.replace(ent.text, replacement)
         return text
@@ -89,18 +92,21 @@ class Anonymizer(Processor):
             cached = ctx.store.cache_get(ctx.session_id, self.name, h)
             if cached is not None:
                 part.text = cached
+                METRICS.inc("cache_hits")
                 continue
 
             try:
                 ents = self._detect(text)
             except Exception as e:  # noqa: BLE001
                 if self.mode == "fail_closed":
+                    METRICS.inc("ner_blocks")
                     raise AnonymizerError(f"NER failed, blocking send: {e}") from e
                 continue  # fail_open: send as-is
 
             text = self._tokenize(text, ents, ctx)
             part.text = text
             ctx.store.cache_put(ctx.session_id, self.name, h, text)
+            METRICS.inc("text_parts_redacted")
 
         # Office documents: tokenize the body text inside the OOXML XML parts
         # (reversibly, same tokens as above). Images in them are handled by
@@ -109,6 +115,7 @@ class Anonymizer(Processor):
             if part.kind is PartKind.OFFICE and part.data:
                 try:
                     part.data = self._redact_office(part.data, ctx)
+                    METRICS.inc("doc:office")
                 except AnonymizerError:
                     raise
                 except Exception as e:  # noqa: BLE001

@@ -101,6 +101,25 @@ class SqliteStore:
             self._conn.commit()
             return cur.rowcount
 
+    def stats(self) -> dict:
+        """Durable, non-sensitive totals for the dashboard (counts only)."""
+        with self._lock:
+            total = self._conn.execute(
+                "SELECT COUNT(*) FROM mappings").fetchone()[0]
+            sessions = self._conn.execute(
+                "SELECT COUNT(DISTINCT session_id) FROM mappings").fetchone()[0]
+            by_type = dict(self._conn.execute(
+                "SELECT entity_type, COUNT(*) FROM mappings "
+                "GROUP BY entity_type").fetchall())
+            cached = self._conn.execute(
+                "SELECT COUNT(*) FROM redaction_cache").fetchone()[0]
+        return {
+            "total_mappings": total,
+            "sessions": sessions,
+            "mappings_by_type": by_type,
+            "cached_documents": cached,
+        }
+
     # --- per-text redaction cache --------------------------------------
     @staticmethod
     def text_hash(text: str) -> str:

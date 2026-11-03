@@ -19,8 +19,9 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
+from aiproxy.metrics import METRICS
 from aiproxy.pipeline.base import SessionContext
 from aiproxy.pipeline.registry import build_pipeline
 from aiproxy.proxy.adapters import ADAPTERS
@@ -109,10 +110,23 @@ def create_app(cfg: dict) -> FastAPI:
     async def healthz():
         return {"ok": True}
 
+    @app.get("/metrics")
+    async def metrics():
+        """JSON counters: runtime (since start) + durable store totals."""
+        snap = METRICS.snapshot()
+        snap["store"] = store.stats()
+        return JSONResponse(snap)
+
+    @app.get("/dashboard", response_class=HTMLResponse)
+    async def dashboard():
+        return HTMLResponse(_DASHBOARD_HTML)
+
     async def _handle(req: Request, provider: str, path: str) -> Response:
         body = await req.json()
         adapter = ADAPTERS[provider]
         ctx = SessionContext(_session_id(req, body), store, cfg)
+        METRICS.inc("requests")
+        METRICS.inc(f"req:{provider}")
 
         # Redact outbound.
         out_doc = pipeline.run_request(adapter.to_document(body), ctx)
@@ -162,3 +176,58 @@ def create_app(cfg: dict) -> FastAPI:
         return StreamingResponse(gen(), media_type="text/event-stream")
 
     return app
+
+
+_DASHBOARD_HTML = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aiproxy dashboard</title>
+<style>
+ :root{color-scheme:light dark}
+ body{font:14px/1.5 system-ui,sans-serif;margin:0;padding:24px;max-width:860px}
+ h1{font-size:20px;margin:0 0 4px} .sub{opacity:.6;margin:0 0 20px}
+ .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:24px}
+ .card{border:1px solid #8884;border-radius:10px;padding:14px}
+ .card .n{font-size:26px;font-weight:600} .card .l{opacity:.6;font-size:12px}
+ table{border-collapse:collapse;width:100%;margin-bottom:24px}
+ th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #8883}
+ td.r,th.r{text-align:right} h2{font-size:14px;opacity:.7;margin:0 0 6px}
+</style></head><body>
+<h1>aiproxy</h1><p class="sub">anonymization metrics · refreshing every 3s</p>
+<div class="grid" id="cards"></div>
+<h2>Entities anonymized by type</h2><table id="ents"></table>
+<h2>Documents by kind</h2><table id="docs"></table>
+<h2>Store (durable)</h2><table id="store"></table>
+<script>
+function row(k,v){return `<tr><td>${k}</td><td class="r">${v}</td></tr>`}
+function card(n,l){return `<div class="card"><div class="n">${n}</div><div class="l">${l}</div></div>`}
+function fmtUptime(s){const h=Math.floor(s/3600),m=Math.floor(s%3600/60);return h+'h '+m+'m'}
+async function tick(){
+ try{
+  const m=await (await fetch('metrics')).json();
+  document.getElementById('cards').innerHTML=
+    card(m.requests_total,'requests')+
+    card(m.text_parts_redacted,'text parts redacted')+
+    card(m.tokens_created,'tokens created')+
+    card((m.store&&m.store.total_mappings)||0,'stored mappings')+
+    card(m.cache_hits,'cache hits')+
+    card(m.ner_blocks,'NER blocks')+
+    card((m.store&&m.store.sessions)||0,'sessions')+
+    card(fmtUptime(m.uptime_seconds),'uptime');
+  const ents=m.entities_by_type||{};
+  document.getElementById('ents').innerHTML=
+    '<tr><th>type</th><th class=r>count</th></tr>'+
+    (Object.keys(ents).length?Object.entries(ents).map(([k,v])=>row(k,v)).join(''):'<tr><td colspan=2>none yet</td></tr>');
+  const docs=m.documents_by_kind||{};
+  document.getElementById('docs').innerHTML=
+    '<tr><th>kind</th><th class=r>count</th></tr>'+
+    (Object.keys(docs).length?Object.entries(docs).map(([k,v])=>row(k,v)).join(''):'<tr><td colspan=2>none yet</td></tr>');
+  const s=m.store||{},bt=s.mappings_by_type||{};
+  document.getElementById('store').innerHTML=
+    row('total mappings',s.total_mappings||0)+row('sessions',s.sessions||0)+
+    row('cached documents',s.cached_documents||0)+
+    Object.entries(bt).map(([k,v])=>row('mappings · '+k,v)).join('');
+ }catch(e){}
+}
+tick();setInterval(tick,3000);
+</script></body></html>"""

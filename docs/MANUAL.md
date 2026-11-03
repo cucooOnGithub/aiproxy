@@ -105,6 +105,18 @@ python -m aiproxy serve --config config.yaml
 
 Health check: `curl http://127.0.0.1:8080/healthz`
 
+### Dashboard
+`http://127.0.0.1:8080/dashboard` — live counts (auto-refresh): requests,
+text parts redacted, tokens created, entities by type, documents by kind
+(image/pdf/office), cache hits, NER blocks, sessions, and durable store
+totals. Raw JSON at `/metrics`. Counts are non-sensitive (how many, never
+the values). Runtime counters reset on restart; store totals persist.
+
+> Redacted documents are **not** written to disk — they are forwarded
+> upstream and discarded. Only token↔original mappings and the redaction
+> cache persist, inside the `store.path` SQLite file. There is no document
+> archive directory.
+
 ### Point your tool at it
 
 **Claude Code / Anthropic SDK:**

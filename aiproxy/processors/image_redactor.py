@@ -19,6 +19,7 @@ import io
 
 from aiproxy.document import Document, Part, PartKind
 from aiproxy.llm.ollama_ner import build_ner
+from aiproxy.metrics import METRICS
 from aiproxy.pipeline.base import Processor, SessionContext
 
 
@@ -37,8 +38,10 @@ class ImageRedactor(Processor):
         for part in doc.media_parts():
             if part.kind is PartKind.IMAGE:
                 part.data = self._redact_image(part.data, part.media_type)
+                METRICS.inc("doc:image")
             elif part.kind is PartKind.PDF:
                 part.data = self._redact_pdf(part.data)
+                METRICS.inc("doc:pdf")
             elif part.kind is PartKind.OFFICE:
                 part.data = self._redact_office(part.data)
         return doc
