@@ -16,6 +16,11 @@ sees the real values but you still read them.
 - Replaces each with a reversible token (`⟦PERSON_1⟧`), stored locally.
 - Restores originals in the model's response (text only).
 - Masks sensitive text in images and PDFs before sending.
+- Redacts only genuine user messages and attached documents. Claude's own
+  operational content — the Claude Code system prompt, CLAUDE.md, skills,
+  slash-command text, `<system-reminder>` blocks and local command output —
+  reaches the model verbatim, so redaction never corrupts how Claude works.
+  Tune the boundary with `scope.redact_system` and `scope.skip_tags` (see §3).
 
 **Does not**
 - Guarantee 100% detection. An LLM can miss an entity. Use `fail_closed`
@@ -129,6 +134,7 @@ aiproxy config set listen.port 9000         # parsed as int
 aiproxy config set store.encrypt true       # parsed as bool
 aiproxy config set llm.models '[qwen2.5:3b-instruct, llama3.2:latest]'
 aiproxy config set anonymizer.entities.PERSON redact
+aiproxy config set scope.redact_system false   # keep the system prompt verbatim
 aiproxy config unset llm.models
 aiproxy config edit                         # interactive wizard
 ```
@@ -158,6 +164,8 @@ Key config fields (full list in `config.example.yaml`):
 | `prewarm` | load the model at startup so the first request skips the cold-load cost (default true) |
 | `pipeline` | ordered processor list (request top→bottom, restore bottom→top) |
 | `mode` | `fail_closed` (block on filter error) or `fail_open` |
+| `scope.redact_system` | redact the top-level system prompt too? Default `false` — the Claude Code system prompt + CLAUDE.md pass through verbatim |
+| `scope.skip_tags` | tags whose `<tag>…</tag>` regions are never redacted wherever they appear in a message (skills, slash-command text, system reminders, local command output); default list in `config.example.yaml` |
 | `anonymizer.entities` | per-type action: `anonymize` / `redact` / `ignore` |
 | `anonymizer.allowlist` | strings never redacted |
 | `anonymizer.denylist` | strings always redacted |

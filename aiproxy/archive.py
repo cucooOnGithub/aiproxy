@@ -19,6 +19,8 @@ Scoping via the `scope` argument:
 from __future__ import annotations
 
 import hashlib
+import json
+import time
 from pathlib import Path
 
 
@@ -55,3 +57,39 @@ class DocArchive:
 def build_archive(cfg: dict) -> "DocArchive | None":
     directory = (cfg.get("archive") or {}).get("dir")
     return DocArchive(directory) if directory else None
+
+
+class RedactionLog:
+    """Append-only JSONL debug log of WHAT each request redacted.
+
+    One JSON line per request. It records only token-bearing (already
+    redacted) text and document metadata so an operator can confirm the
+    pipeline is masking the right things. It NEVER writes an original PII
+    value: those remain encrypted in the mapping store (map.db) and can be
+    recovered from there with AIPROXY_STORE_KEY. Keeping originals out of
+    this plaintext log is the whole point - do not change that.
+    """
+
+    def __init__(self, path: str, debug: bool = False):
+        self.path = Path(path)
+        # WARNING: debug=True also writes ORIGINAL message text (plaintext
+        # PII) into this log. Off by default; opt in only in a trusted env.
+        self.debug = debug
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+
+    def write(self, entry: dict) -> None:
+        entry = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), **entry}
+        try:
+            with self.path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError:
+            pass  # best-effort; never block a request on disk
+
+
+def build_redaction_log(cfg: dict) -> "RedactionLog | None":
+    rl = cfg.get("redaction_log") or {}
+    path = rl.get("path")
+    return RedactionLog(path, debug=bool(rl.get("debug"))) if path else None

@@ -1,27 +1,77 @@
+# aiproxy configuration. Copy to config.yaml and edit.
+
 listen:
   host: 127.0.0.1
   port: 8088
 
+# Where redacted requests are forwarded. The proxy mimics each provider's
+# API, so point your AI tool at http://127.0.0.1:8080 instead of these.
+# Override any base_url without editing this file via env:
+#   AIPROXY_UPSTREAM_ANTHROPIC=https://api.anthropic.com
+#   AIPROXY_UPSTREAM_OPENAI=http://127.0.0.1:9000   # e.g. another proxy
+# The env value wins; a provider named only in env is added automatically.
 upstreams:
   anthropic:
-    base_url: https://api.anthropic.com   # overridden by env for the echo proof
+    base_url: http://127.0.0.1:8787
+  openai:
+    base_url: http://127.0.0.1:8787
 
+# Shared local-LLM used by anonymizer + image_redactor for NER.
 llm:
-  url: http://localhost:11434
-  # Single model:  model: llama3.2:latest
-  # Ensemble (union, higher recall): list models cheap-first.
-  # 7B won't fit while OpenWhispr holds ~3.9GB VRAM; use two 3B models.
-  models:
-    - qwen2.5:3b-instruct
-    - llama3.2:latest
-  keep_alive: 0   # unload each model after its call so the ensemble fits
+  url: http://localhost:11434   # Ollama
+  # Pick ONE of:
+  #   model: llama3.2:latest        # single model
+  #   models: [m1, m2]              # ensemble: union entities (higher recall,
+  #                                 # latency = sum, may thrash GPU VRAM)
+  model: qwen2.5:3b-instruct
+  timeout: 60          # seconds per NER request (model-load counts here)
+  warm_timeout: 300    # seconds allowed for the startup pre-warm cold load
+  # keep_alive: 0      # unload model after each call; needed for an ensemble
+                       # on a VRAM-tight GPU (else models thrash / OOM)
+  cache_ttl: 3600      # seconds to keep in-memory NER results (null = forever);
+                       # a reloaded model never re-runs NER on cached text
+  # Entity types the model may return (also enum-constrains the JSON schema).
+  # Add a custom type here AND give it an action under `anonymizer.entities`.
+  entity_types: [PERSON, ORG, LOCATION, EMAIL, PHONE]
+  # Override the NER prompt. MUST contain {text}; {types} is optional and is
+  # filled from entity_types above. Default detects the standard PII types.
+  # prompt: |
+  #   You are a PII detector. Find every {types} in the text. Return JSON
+  #   only. Copy the entity text exactly as it appears. Text:\n\n{text}
 
+# Load the local model at startup so the first request doesn't hit the
+# cold-load cost against `llm.timeout`. Set false to skip.
+prewarm: true
+
+# Ordered list of processors. Request path runs top->bottom;
+# response path (restoration) runs bottom->top.
 pipeline:
   - logger
   - secrets_regex
   - anonymizer
+  - image_redactor
 
+# fail_closed: block the send if a filter errors (never leak).
+# fail_open:   send original content if a filter errors (risky).
 mode: fail_closed
+
+# What the redactors are allowed to touch. Claude's own operational content
+# (the Claude Code system prompt, CLAUDE.md, skills, slash-command text,
+# system reminders, local command output) must reach the model verbatim and
+# is NEVER redacted; only genuine user messages and attached documents are.
+scope:
+  # false (default): the top-level `system` prompt passes through untouched.
+  # true: also run redaction over the system prompt.
+  redact_system: false
+  # Any <tag>...</tag> region whose tag is listed here is protected wherever
+  # it is injected inside a message, then restored verbatim before forwarding.
+  skip_tags:
+    - system-reminder
+    - command-name
+    - command-args
+    - command-message
+    - local-command-stdout
+    - local-command-stderr
 
 secrets_regex:
   patterns: [EMAIL, APIKEY, IBAN, PHONE]
@@ -32,10 +82,25 @@ anonymizer:
     ORG: anonymize
     LOCATION: ignore
     EMAIL: anonymize
-  allowlist: []
-  denylist: []
+    PHONE: anonymize
+  allowlist: []     # strings never redacted (e.g. your own company)
+  denylist: []      # strings always redacted
+
+image_redactor:
+  max_pages: 20
 
 store:
   backend: sqlite
-  path: /tmp/claude-1000/-mnt-t7data-AI-projects-AI-projects-aiproxy/8820584a-ee81-43c2-be29-aa4b6819ca57/scratchpad/map.db
-  encrypt: false
+  path: ./map.db
+  encrypt: true     # requires env AIPROXY_STORE_KEY (python -m aiproxy genkey)
+
+# Optional on-disk archive of REDACTED documents, keyed by a hash of the
+# original. Doubles as a cache: re-presenting the same document reads the
+# redacted version from here instead of re-running the local LLM / OCR.
+# Only redacted output is written (never the original PII). Omit to disable.
+# archive:
+  dir: /home/cucoo/AI_projects/AI/projects/aiproxy/dist/archive
+
+redaction_log:
+  path: /home/cucoo/AI_projects/AI/projects/aiproxy/dist/archive/redaction_log.jsonl
+  debug: true

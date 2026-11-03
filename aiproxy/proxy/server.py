@@ -21,7 +21,7 @@ import httpx
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
-from aiproxy.archive import build_archive
+from aiproxy.archive import build_archive, build_redaction_log
 from aiproxy.metrics import METRICS
 from aiproxy.pipeline.base import SessionContext
 from aiproxy.pipeline.registry import build_pipeline
@@ -78,6 +78,7 @@ async def _prewarm(pipeline, cfg: dict) -> None:
 def create_app(cfg: dict) -> FastAPI:
     store = _build_store(cfg)
     archive = build_archive(cfg)
+    redaction_log = build_redaction_log(cfg)
     pipeline = build_pipeline(cfg["pipeline"], cfg)
     upstreams = cfg["upstreams"]
 
@@ -127,6 +128,7 @@ def create_app(cfg: dict) -> FastAPI:
         body = await req.json()
         adapter = ADAPTERS[provider]
         ctx = SessionContext(_session_id(req, body), store, cfg, archive)
+        ctx.log = redaction_log
         METRICS.inc("requests")
         METRICS.inc(f"req:{provider}")
 

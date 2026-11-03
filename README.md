@@ -76,6 +76,10 @@ except the local echo round-trip below.
 - **Documents**: images (OCR→mask), PDFs (true text redaction + embedded
   images + scanned-page rasterize), and OOXML Office `.docx`/`.pptx`/`.xlsx`
   (body text tokenized reversibly + `*/media/` images masked).
+- **Scope**: only genuine user messages and attached documents are redacted.
+  Claude's own operational content — the Claude Code system prompt, CLAUDE.md,
+  skills, slash-command text, system reminders, local command output — reaches
+  the model verbatim. Tunable via `scope:` (`redact_system`, `skip_tags`).
 - **Caching**: in-memory NER cache (TTL) + persistent per-document
   redaction cache (re-presented docs skip re-work).
 - **Verified live**: local echo upstream — real name/email/company went

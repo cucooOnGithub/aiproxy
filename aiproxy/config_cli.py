@@ -47,11 +47,22 @@ _WIZARD = [
     ("llm.keep_alive", "Ollama keep_alive (0 to unload each call)", "0"),
     ("llm.cache_ttl", "NER cache TTL (s, null=forever)", "3600"),
     ("mode", "Failure mode (fail_closed | fail_open)", "fail_closed"),
+    ("scope.redact_system",
+     "Redact the system prompt too? Claude Code system prompt + CLAUDE.md "
+     "live here (true/false)", "false"),
+    ("scope.skip_tags",
+     "Tags whose <tag>...</tag> regions are never redacted (skills, commands, "
+     "reminders), as a YAML list",
+     "[system-reminder, command-name, command-args, command-message, "
+     "local-command-stdout, local-command-stderr]"),
     ("image_redactor.max_pages", "Max PDF pages", "20"),
     ("image_redactor.dpi", "Scanned-page raster DPI", "200"),
     ("store.path", "Store DB path", "./map.db"),
     ("store.encrypt", "Encrypt store at rest (true/false)", "true"),
     ("archive.dir", "Redacted-document archive/cache dir (blank = off)", ""),
+    ("redaction_log.path", "Redaction debug JSONL path (blank = off)", ""),
+    ("redaction_log.debug",
+     "Log ORIGINAL message text too - plaintext PII! (true/false)", "false"),
     ("prewarm", "Pre-warm models at startup (true/false)", "true"),
 ]
 

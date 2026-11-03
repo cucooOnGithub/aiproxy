@@ -55,6 +55,24 @@ pipeline:
 # fail_open:   send original content if a filter errors (risky).
 mode: fail_closed
 
+# What the redactors are allowed to touch. Claude's own operational content
+# (the Claude Code system prompt, CLAUDE.md, skills, slash-command text,
+# system reminders, local command output) must reach the model verbatim and
+# is NEVER redacted; only genuine user messages and attached documents are.
+scope:
+  # false (default): the top-level `system` prompt passes through untouched.
+  # true: also run redaction over the system prompt.
+  redact_system: false
+  # Any <tag>...</tag> region whose tag is listed here is protected wherever
+  # it is injected inside a message, then restored verbatim before forwarding.
+  skip_tags:
+    - system-reminder
+    - command-name
+    - command-args
+    - command-message
+    - local-command-stdout
+    - local-command-stderr
+
 secrets_regex:
   patterns: [EMAIL, APIKEY, IBAN, PHONE]
 
@@ -82,3 +100,17 @@ store:
 # Only redacted output is written (never the original PII). Omit to disable.
 # archive:
 #   dir: ./redacted_archive
+
+# Optional append-only JSONL debug log: one line per forwarded request
+# recording WHAT was redacted - the post-redaction (token-bearing) message
+# text, per-entity token counts, and attached document names/sizes. Never
+# writes original PII (those stay encrypted in the store); use it to confirm
+# the pipeline masks the right things. Omit to disable.
+#
+# debug: true ALSO writes the ORIGINAL message text in plaintext next to the
+# redacted version (messages only; documents stay name-only) so you can see
+# each original<->redacted pair. This puts real PII on disk unencrypted -
+# leave it false except in a trusted debugging environment.
+# redaction_log:
+#   path: ./redacted_archive/redaction_log.jsonl
+#   debug: false
