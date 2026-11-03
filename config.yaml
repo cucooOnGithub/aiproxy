@@ -23,7 +23,11 @@ llm:
   #   model: llama3.2:latest        # single model
   #   models: [m1, m2]              # ensemble: union entities (higher recall,
   #                                 # latency = sum, may thrash GPU VRAM)
-  model: qwen2.5:3b-instruct
+  model: qwen2.5:3b-instruct     # single small model (fast to load)
+  # Ensemble alternative (higher recall, much slower to load each call):
+  # models:
+  #   - qwen2.5:7b-instruct-q4_K_M
+  #   - llama3.1:8b
   timeout: 60          # seconds per NER request (model-load counts here)
   warm_timeout: 300    # seconds allowed for the startup pre-warm cold load
   # keep_alive: 0      # unload model after each call; needed for an ensemble
@@ -94,11 +98,19 @@ anonymizer:
   entities:
     PERSON: anonymize
     ORG: anonymize
-    LOCATION: ignore
+    LOCATION: anonymize
     EMAIL: anonymize
     PHONE: anonymize
   allowlist: []     # strings never redacted (e.g. your own company)
   denylist: []      # strings always redacted
+  # Known-name gazetteer: a file of name PARTS (one per line, given names and
+  # surnames mixed). Adjacent capitalized tokens whose lowercase form is in
+  # the file are joined into one PERSON (e.g. Maria + Silva -> Maria Silva),
+  # giving deterministic name recall for names the LLM misses. Blank = off.
+  name_gazetteer: ./names.txt
+  # Shortest run of adjacent known parts that counts as a name (default 1).
+  # Set 2 to only mask multi-part names and avoid masking lone first names.
+  name_gazetteer_min_parts: 1
 
 image_redactor:
   max_pages: 20
@@ -112,7 +124,7 @@ store:
 # original. Doubles as a cache: re-presenting the same document reads the
 # redacted version from here instead of re-running the local LLM / OCR.
 # Only redacted output is written (never the original PII). Omit to disable.
-# archive:
+archive:
   dir: /home/cucoo/AI_projects/AI/projects/aiproxy/dist/archive
 
 redaction_log:
