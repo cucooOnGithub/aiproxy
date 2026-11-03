@@ -163,7 +163,7 @@ Key config fields (full list in `config.example.yaml`):
 | `llm.warm_timeout` | seconds allowed for the startup pre-warm cold load (default 300) |
 | `prewarm` | load the model at startup so the first request skips the cold-load cost (default true) |
 | `pipeline` | ordered processor list (request top→bottom, restore bottom→top) |
-| `mode` | `fail_closed` (block on filter error) or `fail_open` |
+| `mode` | `fail_closed` (block on filter error), `fail_open` (send original on error), or `observe` (never redact — forward every request un-redacted and just log it; **sends real data upstream in the clear**, diagnostic only) |
 | `scope.redact_system` | redact the top-level system prompt too? Default `false` — the Claude Code system prompt + CLAUDE.md pass through verbatim |
 | `scope.skip_tags` | tags whose `<tag>…</tag>` regions are never redacted wherever they appear in a message (skills, slash-command text, system reminders, local command output); default list in `config.example.yaml` |
 | `scope.skip_prefixes` | protect a whole text block when its stripped text starts with any of these — catches operational blocks Claude Code injects untagged (`# Environment`, `You are Claude Code`, `Direct output style is active`, `[SUGGESTION MODE`). Every other block (all user **and** assistant turns, plus documents) is redacted, so repeated PII maps to the same token |
@@ -172,6 +172,8 @@ Key config fields (full list in `config.example.yaml`):
 | `anonymizer.allowlist` | strings never redacted |
 | `anonymizer.denylist` | strings always redacted |
 | `store.encrypt` | encrypt originals at rest (needs `AIPROXY_STORE_KEY`) |
+| `redaction_log.debug` | also log the original (plaintext) message text alongside the redacted version — real PII on disk; leave `false` outside a trusted env |
+| `redaction_log.log_all` | log **every** text block, not just the ones that were redacted (default `false`); operational blocks still appear as placeholders unless `mode: observe` |
 
 ---
 

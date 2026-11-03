@@ -53,6 +53,9 @@ pipeline:
 
 # fail_closed: block the send if a filter errors (never leak).
 # fail_open:   send original content if a filter errors (risky).
+# observe:     DO NOT redact at all - forward every request un-redacted and
+#              log what was sent (diagnostic/audit only). WARNING: this sends
+#              your real data upstream in the clear; never use it in production.
 mode: fail_closed
 
 # What the redactors are allowed to touch. Claude's own operational content
@@ -122,6 +125,9 @@ store:
 # redacted version (messages only; documents stay name-only) so you can see
 # each original<->redacted pair. This puts real PII on disk unencrypted -
 # leave it false except in a trusted debugging environment.
+# log_all: true logs EVERY text block, not just the redacted ones (default
+# false). Operational blocks still show as placeholders unless mode: observe.
 # redaction_log:
 #   path: ./redacted_archive/redaction_log.jsonl
 #   debug: false
+#   log_all: false

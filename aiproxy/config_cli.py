@@ -46,7 +46,8 @@ _WIZARD = [
     ("llm.warm_timeout", "Pre-warm timeout (s)", "300"),
     ("llm.keep_alive", "Ollama keep_alive (0 to unload each call)", "0"),
     ("llm.cache_ttl", "NER cache TTL (s, null=forever)", "3600"),
-    ("mode", "Failure mode (fail_closed | fail_open)", "fail_closed"),
+    ("mode", "Mode (fail_closed | fail_open | observe). observe forwards "
+     "UN-redacted and just logs - sends real data upstream!", "fail_closed"),
     ("scope.redact_system",
      "Redact the system prompt too? Claude Code system prompt + CLAUDE.md "
      "live here (true/false)", "false"),
@@ -71,6 +72,8 @@ _WIZARD = [
     ("redaction_log.path", "Redaction debug JSONL path (blank = off)", ""),
     ("redaction_log.debug",
      "Log ORIGINAL message text too - plaintext PII! (true/false)", "false"),
+    ("redaction_log.log_all",
+     "Log EVERY text block, not just redacted ones (true/false)", "false"),
     ("prewarm", "Pre-warm models at startup (true/false)", "true"),
 ]
 

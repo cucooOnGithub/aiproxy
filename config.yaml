@@ -53,6 +53,9 @@ pipeline:
 
 # fail_closed: block the send if a filter errors (never leak).
 # fail_open:   send original content if a filter errors (risky).
+# observe:     DO NOT redact at all - forward every request un-redacted and
+#              log what was sent (diagnostic/audit only). WARNING: this sends
+#              your real data upstream in the clear; never use it in production.
 mode: fail_closed
 
 # What the redactors are allowed to touch. Claude's own operational content
@@ -115,3 +118,7 @@ store:
 redaction_log:
   path: /home/cucoo/AI_projects/AI/projects/aiproxy/dist/archive/redaction_log.jsonl
   debug: true
+  # false (default): log only blocks that were actually redacted (carry a
+  # token or [REDACTED]). true: log EVERY text block, redacted or not
+  # (operational blocks still appear as placeholders unless mode: observe).
+  log_all: false

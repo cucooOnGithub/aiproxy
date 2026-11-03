@@ -176,31 +176,42 @@ class Pipeline:
 
     def run_request(self, doc: Document, ctx: SessionContext) -> Document:
         log = getattr(ctx, "log", None)
+        # observe mode: forward every request UN-redacted (nothing is masked
+        # or tokenized) and log what was sent. Diagnostic only — it sends your
+        # real data upstream in the clear.
+        observe = (getattr(ctx, "config", None) or {}).get("mode") == "observe"
+        # log_all: log every text block, not just the redacted ones. Implied
+        # by observe (there are no redacted blocks to filter to).
+        log_all = observe or (log is not None
+                              and bool(getattr(log, "log_all", False)))
         # Protect Claude's operational content (system prompt, skills,
         # commands, reminders) before anything redacts; restored verbatim
-        # at the end so upstream receives it unchanged.
-        saved = self._mask(doc, ctx)
+        # at the end so upstream receives it unchanged. Skipped in observe.
+        saved = {} if observe else self._mask(doc, ctx)
         # In debug mode we need the pre-redaction text to show each
         # original<->redacted pair. Snapshot by part index BEFORE processing;
         # processors edit parts in place and never reorder, so indices align.
         originals = None
-        if log is not None and getattr(log, "debug", False):
+        if log is not None and (getattr(log, "debug", False) or log_all):
             originals = {i: p.text for i, p in enumerate(doc.parts)
                          if p.kind is PartKind.TEXT}
-        for p in self.processors:
-            if self._relevant(p, doc):
-                doc = p.process_request(doc, ctx)
+        if not observe:
+            for p in self.processors:
+                if self._relevant(p, doc):
+                    doc = p.process_request(doc, ctx)
         if log is not None:
-            entry = self._log_entry(doc, ctx, originals)
-            # Nothing redacted (no tokenized message, no document)? Don't log.
+            entry = self._log_entry(doc, ctx, originals, log_all)
+            # Nothing redacted (no tokenized message, no document)? Don't log,
+            # unless log_all is set (then every request is logged).
             if entry["messages"] or entry["documents"]:
                 log.write(entry)
-        self._unmask(doc, saved)
+        if not observe:
+            self._unmask(doc, saved)
         return doc
 
     @staticmethod
     def _log_entry(doc: Document, ctx: SessionContext,
-                   originals: dict | None) -> dict:
+                   originals: dict | None, log_all: bool = False) -> dict:
         """Build a record of what the request redacted.
 
         Normal mode: PII-free. Logged text is post-redaction (carries
@@ -221,7 +232,8 @@ class Pipeline:
                 if not part.text.strip():
                     continue  # empty/whitespace part: nothing to log
                 tokens = [m.group(1) for m in TOKEN_RE.finditer(part.text)]
-                if not tokens and "[REDACTED]" not in part.text:
+                if (not log_all and not tokens
+                        and "[REDACTED]" not in part.text):
                     continue
                 entity_totals.update(tokens)
                 msg = {"role": part.origin.get("role", ""),

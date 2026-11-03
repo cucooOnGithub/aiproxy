@@ -70,11 +70,14 @@ class RedactionLog:
     this plaintext log is the whole point - do not change that.
     """
 
-    def __init__(self, path: str, debug: bool = False):
+    def __init__(self, path: str, debug: bool = False, log_all: bool = False):
         self.path = Path(path)
         # WARNING: debug=True also writes ORIGINAL message text (plaintext
         # PII) into this log. Off by default; opt in only in a trusted env.
         self.debug = debug
+        # log_all=True logs EVERY text block, not just the redacted ones
+        # (operational blocks still show as placeholders in normal mode).
+        self.log_all = log_all
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         except OSError:
@@ -92,4 +95,5 @@ class RedactionLog:
 def build_redaction_log(cfg: dict) -> "RedactionLog | None":
     rl = cfg.get("redaction_log") or {}
     path = rl.get("path")
-    return RedactionLog(path, debug=bool(rl.get("debug"))) if path else None
+    return RedactionLog(path, debug=bool(rl.get("debug")),
+                        log_all=bool(rl.get("log_all"))) if path else None
