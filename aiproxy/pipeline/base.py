@@ -191,7 +191,10 @@ class Pipeline:
             if self._relevant(p, doc):
                 doc = p.process_request(doc, ctx)
         if log is not None:
-            log.write(self._log_entry(doc, ctx, originals))
+            entry = self._log_entry(doc, ctx, originals)
+            # Nothing redacted (no tokenized message, no document)? Don't log.
+            if entry["messages"] or entry["documents"]:
+                log.write(entry)
         self._unmask(doc, saved)
         return doc
 
@@ -211,8 +214,16 @@ class Pipeline:
         entity_totals: Counter[str] = Counter()
         for i, part in enumerate(doc.parts):
             if part.kind is PartKind.TEXT and part.text is not None:
-                entity_totals.update(m.group(1)
-                                     for m in TOKEN_RE.finditer(part.text))
+                # Only log blocks that were actually redacted: those carrying
+                # a reversible ⟦TYPE_n⟧ token or a [REDACTED] marker. Protected
+                # operational blocks (placeholders), empties and no-PII
+                # passthroughs are skipped so the log shows only real changes.
+                if not part.text.strip():
+                    continue  # empty/whitespace part: nothing to log
+                tokens = [m.group(1) for m in TOKEN_RE.finditer(part.text)]
+                if not tokens and "[REDACTED]" not in part.text:
+                    continue
+                entity_totals.update(tokens)
                 msg = {"role": part.origin.get("role", ""),
                        "redacted_text": part.text}
                 if debug:
