@@ -67,6 +67,10 @@ class Anonymizer(Processor):
             for ent in sorted(ents, key=lambda e: len(e.text), reverse=True):
                 if ent.text in self.allow or not ent.text.strip():
                     continue
+                # Never re-tokenize a token an earlier processor already made
+                # (e.g. the NER model flagging ⟦EMAIL_1⟧ as an email).
+                if TOKEN_RE.search(ent.text):
+                    continue
                 action = "redact" if ent.text in self.deny else self._action(ent.type)
                 if action == "ignore":
                     continue
