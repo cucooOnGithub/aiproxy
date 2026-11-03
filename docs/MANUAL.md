@@ -265,9 +265,13 @@ Add its name to `pipeline:` in config. For reversible redaction, use
 
 - Images: OCR → NER → opaque black boxes over flagged words → re-encoded
   PNG sent upstream.
-- Text-layer PDFs: true redaction (PyMuPDF removes the underlying text) AND
-  every raster image embedded in the page is inspected and masked.
-- Scanned PDFs: rasterized, then treated as images.
+- PDFs (all kinds): every page is rasterized at `image_redactor.dpi`
+  (pypdfium2 render), then treated as an image (OCR → NER → opaque mask
+  boxes). The masked page rasters are reassembled into an image-only PDF.
+  This covers text pages, scanned pages, and embedded images uniformly and
+  leaves no hidden text layer upstream. Tradeoff: the forwarded PDF is
+  image-based (no selectable text); text masking is OCR-driven, so OCR
+  quality bounds detection. No AGPL dependency (pypdfium2 is Apache-2.0/BSD).
 - Office docs (OOXML `.docx`/`.pptx`/`.xlsx`, incl. SharePoint exports):
   body **text** in `<w:t>`/`<a:t>`/`<t>` nodes is tokenized reversibly
   (by the anonymizer, same tokens as plain text — so the model's reply
@@ -308,3 +312,21 @@ pytest
 ```
 `tests/test_roundtrip.py` proves tokenize→store→restore with the
 deterministic secrets filter (no LLM needed).
+
+---
+
+## 10. License
+
+aiproxy is licensed under the **PolyForm Noncommercial License 1.0.0**
+(`LICENSE` at the repo root): you may use, copy, modify, and distribute it
+for any **noncommercial** purpose, free of charge. Commercial use is not
+granted by that license. Copyright and all intellectual property are
+retained by the authors, who reserve all commercial rights — a separate
+commercial license is available on request (`NOTICE`).
+
+Third-party dependencies are all permissive (MIT/BSD/Apache) and keep their
+own licenses; see `THIRD_PARTY_LICENSES.md`. The project deliberately uses
+no copyleft dependencies — PyMuPDF (AGPL-3.0) was replaced with pypdfium2
+(BSD/Apache) so the whole service can be offered under noncommercial-only
+terms. Local model weights (e.g. Llama 3.2, Qwen2.5) are licensed by their
+publishers and are the operator's responsibility; aiproxy bundles no weights.

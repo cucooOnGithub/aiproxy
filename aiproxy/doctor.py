@@ -40,8 +40,8 @@ def run_checks(config_path: str) -> list[Result]:
                           "" if _mod(m) else "pip install -e ."))
 
     # Media deps (optional — needed only for image/PDF/Office redaction)
-    for m in ("PIL", "pytesseract", "fitz"):
-        shown = {"PIL": "pillow", "fitz": "pymupdf"}.get(m, m)
+    for m in ("PIL", "pytesseract", "pypdfium2"):
+        shown = {"PIL": "pillow"}.get(m, m)
         out.append(Result(f"media dep: {shown}", _mod(m), False,
                           "" if _mod(m) else 'pip install -e ".[media]"'))
 

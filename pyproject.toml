@@ -2,6 +2,8 @@
 name = "aiproxy"
 version = "0.1.0"
 description = "Anonymizing reverse proxy for LLM APIs"
+license = "PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md"]
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.110",
@@ -17,7 +19,7 @@ dependencies = [
 media = [
     "pillow>=10.0",
     "pytesseract>=0.3.10",
-    "pymupdf>=1.24",
+    "pypdfium2>=4.30",
 ]
 dev = [
     "pytest>=8.0",

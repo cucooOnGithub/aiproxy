@@ -83,3 +83,13 @@ aiproxy/llm/          Ollama NER client, MultiNER ensemble, build_ner
 aiproxy/config/       YAML loader (+ AIPROXY_UPSTREAM_* env overrides)
 docs/MANUAL.md        install + usage + extending
 ```
+
+## License
+
+aiproxy is licensed under the **PolyForm Noncommercial License 1.0.0**
+(`LICENSE`): free to use, modify, and distribute for any **noncommercial**
+purpose. Copyright and all IP are retained by the authors, who reserve all
+commercial rights — a separate commercial license is available on request.
+Third-party components keep their own permissive licenses
+(`THIRD_PARTY_LICENSES.md`); local model weights are licensed by their
+publishers and are the operator's responsibility (`NOTICE`).

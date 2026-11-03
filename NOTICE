@@ -1,0 +1,21 @@
+aiproxy — Anonymizing reverse proxy for LLM APIs
+
+Required Notice: Copyright © 2026 the aiproxy authors.
+
+Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+You may use, copy, modify, and distribute this software for any
+NONCOMMERCIAL purpose, free of charge. Commercial use is NOT granted by
+that license.
+
+The copyright and all intellectual property in aiproxy are retained by
+the authors. The authors reserve all commercial rights: a separate
+commercial license is required for any commercial use, and is available
+from the authors. Dual-licensing this way (noncommercial to the public,
+commercial by agreement) does not affect the noncommercial grant above.
+
+This product includes third-party open-source software. Those components
+keep their own licenses and copyrights; see THIRD_PARTY_LICENSES.md for
+the full list and notices. None of them restrict the noncommercial grant
+above, and aiproxy intentionally avoids copyleft dependencies (e.g.
+AGPL-licensed PyMuPDF was replaced with pypdfium2) so this project can be
+offered under noncommercial-only terms.

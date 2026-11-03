@@ -6,8 +6,8 @@ Pipeline per media part:
   3. Optionally a local vision model (llava via Ollama) to catch faces /
      logos / handwriting OCR misses. [hook left as TODO]
   4. Paint opaque boxes over flagged regions (Pillow).
-  5. PDFs: text-layer pages get TRUE redaction via PyMuPDF (text removed,
-     not just covered); scanned pages are rasterized through step 1-4.
+  5. PDFs: every page is rasterized (pypdfium2) and run through steps 1-4,
+     then reassembled into an image-only PDF. No AGPL dependency.
 
 Image/PDF redaction is NOT reversible — a masked pixel region cannot be
 restored. Only text tokens round-trip. The response path is a no-op here.
@@ -117,49 +117,36 @@ class ImageRedactor(Processor):
 
     # --- pdf path -------------------------------------------------------
     def _redact_pdf(self, data: bytes) -> bytes:
-        import pymupdf  # PyMuPDF (>=1.24; `import fitz` is deprecated)
+        """Rasterize every page and run it through the image path.
 
-        src = pymupdf.open(stream=data, filetype="pdf")
-        out = pymupdf.open()
-        for page in src[: self.max_pages]:
-            text = page.get_text()
-            if text.strip():
-                # Text-layer page: true redaction removes the glyphs.
-                flagged = {e.text for e in self.ner.detect(text)}
-                for term in flagged:
-                    for rect in page.search_for(term):
-                        page.add_redact_annot(rect, fill=(0, 0, 0))
-                page.apply_redactions()
-                # Also inspect images embedded in this text page (a text PDF
-                # can still carry pictures that hold names/faces).
-                self._redact_pdf_page_images(src, page)
-                out.insert_pdf(src, from_page=page.number, to_page=page.number)
-            else:
-                # Scanned/image-only page: rasterize, run the image path
-                # (OCR -> NER -> mask), rebuild the page from the masked raster.
-                pix = page.get_pixmap(dpi=self.dpi)
-                masked = self._redact_image(pix.tobytes("png"), "image/png")
-                new = out.new_page(width=page.rect.width, height=page.rect.height)
-                new.insert_image(page.rect, stream=masked)
-        buf = io.BytesIO()
-        out.save(buf)
-        out.close()
-        src.close()
-        return buf.getvalue()
+        Each page (up to max_pages) is rendered to a raster at self.dpi,
+        passed through _redact_image (OCR -> NER -> opaque mask boxes), and
+        the masked rasters are reassembled into an image-only PDF. This
+        covers text, scanned pages, and embedded images uniformly, and
+        leaves no hidden text layer upstream. Tradeoff: the output PDF is
+        image-based (no selectable text); text masking is OCR-driven.
+        Uses pypdfium2 (Apache-2.0/BSD) + Pillow, no AGPL dependency.
+        """
+        import pypdfium2 as pdfium
+        from PIL import Image
 
-    def _redact_pdf_page_images(self, doc, page) -> None:
-        """Mask sensitive content inside raster images embedded on a page."""
-        import logging
-
-        for img in page.get_images(full=True):
-            xref = img[0]
-            try:
-                info = doc.extract_image(xref)
-                masked = self._redact_image(info["image"], "image/png")
-                page.replace_image(xref, stream=masked)
-            except Exception as e:  # noqa: BLE001
-                logging.getLogger("aiproxy").warning(
-                    "pdf embedded image xref=%s skipped: %s", xref, e)
+        pdf = pdfium.PdfDocument(data)
+        scale = self.dpi / 72.0
+        pages: list[Image.Image] = []
+        try:
+            for i in range(min(len(pdf), self.max_pages)):
+                pil = pdf[i].render(scale=scale).to_pil().convert("RGB")
+                buf = io.BytesIO()
+                pil.save(buf, format="PNG")
+                masked = self._redact_image(buf.getvalue(), "image/png")
+                pages.append(Image.open(io.BytesIO(masked)).convert("RGB"))
+        finally:
+            pdf.close()
+        out = io.BytesIO()
+        if pages:
+            pages[0].save(out, format="PDF", save_all=True,
+                          append_images=pages[1:])
+        return out.getvalue()
 
     # --- office (OOXML: docx/pptx/xlsx) path ---------------------------
     def _redact_office(self, data: bytes) -> bytes:
