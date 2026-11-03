@@ -41,41 +41,49 @@ class AnthropicAdapter(Adapter):
     def to_document(self, body: dict) -> Document:
         doc = Document(provider=self.provider, raw=body)
         for mi, msg in enumerate(body.get("messages", [])):
+            role = msg.get("role", "")
             content = msg.get("content")
             if isinstance(content, str):
                 doc.parts.append(
                     Part(PartKind.TEXT, text=content,
-                         origin={"path": ("messages", mi, "content")})
+                         origin={"path": ("messages", mi, "content"),
+                                 "role": role})
                 )
             elif isinstance(content, list):
                 for ci, block in enumerate(content):
-                    doc.parts.append(self._block_to_part(block, mi, ci))
+                    doc.parts.append(self._block_to_part(block, mi, ci, role))
         # System prompt is a top-level string (or list) in Anthropic.
         sys = body.get("system")
         if isinstance(sys, str):
             doc.parts.append(
-                Part(PartKind.TEXT, text=sys, origin={"path": ("system",)})
+                Part(PartKind.TEXT, text=sys,
+                     origin={"path": ("system",), "role": "system"})
             )
         return doc
 
-    def _block_to_part(self, block: dict, mi: int, ci: int) -> Part:
+    def _block_to_part(self, block: dict, mi: int, ci: int,
+                       role: str = "") -> Part:
         path = ("messages", mi, "content", ci)
         btype = block.get("type")
         if btype == "text":
-            return Part(PartKind.TEXT, text=block["text"], origin={"path": path})
+            return Part(PartKind.TEXT, text=block["text"],
+                        origin={"path": path, "role": role})
         if btype == "image":
             src = block.get("source", {})
             data = base64.b64decode(src.get("data", "")) if src.get("data") else None
             return Part(PartKind.IMAGE, data=data,
-                        media_type=src.get("media_type"), origin={"path": path})
+                        media_type=src.get("media_type"),
+                        origin={"path": path, "role": role})
         if btype == "document":  # PDF or OOXML office doc
             src = block.get("source", {})
             data = base64.b64decode(src.get("data", "")) if src.get("data") else None
             mt = src.get("media_type") or ""
             kind = PartKind.OFFICE if _is_office(mt) else PartKind.PDF
-            return Part(kind, data=data, media_type=mt, origin={"path": path})
+            return Part(kind, data=data, media_type=mt,
+                        origin={"path": path, "role": role})
         # Unknown block: keep as inert text so it round-trips untouched.
-        return Part(PartKind.TEXT, text="", origin={"path": path, "inert": True})
+        return Part(PartKind.TEXT, text="",
+                    origin={"path": path, "role": role, "inert": True})
 
     def from_document(self, doc: Document) -> dict:
         body = doc.raw
@@ -155,33 +163,38 @@ class OpenAIAdapter(Adapter):
     def to_document(self, body: dict) -> Document:
         doc = Document(provider=self.provider, raw=body)
         for mi, msg in enumerate(body.get("messages", [])):
+            role = msg.get("role", "")
             content = msg.get("content")
             if isinstance(content, str):
                 doc.parts.append(
                     Part(PartKind.TEXT, text=content,
-                         origin={"path": ("messages", mi, "content")})
+                         origin={"path": ("messages", mi, "content"),
+                                 "role": role})
                 )
             elif isinstance(content, list):
                 for ci, block in enumerate(content):
-                    doc.parts.append(self._block_to_part(block, mi, ci))
+                    doc.parts.append(self._block_to_part(block, mi, ci, role))
         return doc
 
-    def _block_to_part(self, block: dict, mi: int, ci: int) -> Part:
+    def _block_to_part(self, block: dict, mi: int, ci: int,
+                       role: str = "") -> Part:
         path = ("messages", mi, "content", ci)
         btype = block.get("type")
         if btype == "text":
             return Part(PartKind.TEXT, text=block.get("text", ""),
-                        origin={"path": path})
+                        origin={"path": path, "role": role})
         if btype == "image_url":
             url = block.get("image_url", {}).get("url", "")
             parsed = _parse_data_url(url)
             if parsed:
                 media_type, data = parsed
                 return Part(PartKind.IMAGE, data=data, media_type=media_type,
-                            origin={"path": path})
+                            origin={"path": path, "role": role})
             # Remote URL: cannot redact; leave untouched.
-            return Part(PartKind.TEXT, text="", origin={"path": path, "inert": True})
-        return Part(PartKind.TEXT, text="", origin={"path": path, "inert": True})
+            return Part(PartKind.TEXT, text="",
+                        origin={"path": path, "role": role, "inert": True})
+        return Part(PartKind.TEXT, text="",
+                    origin={"path": path, "role": role, "inert": True})
 
     def from_document(self, doc: Document) -> dict:
         body = doc.raw

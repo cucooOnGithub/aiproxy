@@ -72,6 +72,17 @@ scope:
     - command-message
     - local-command-stdout
     - local-command-stderr
+  # A whole text block is protected when its stripped text STARTS WITH any of
+  # these. Catches operational blocks Claude Code injects untagged. Every
+  # other block - all user AND assistant turns, plus documents - is redacted.
+  skip_prefixes:
+    - "# Environment"
+    - "You are Claude Code"
+    - "Direct output style is active"
+    - "[SUGGESTION MODE"
+  # Same, but protect the block when any of these regexes matches it
+  # (re.search, DOTALL) - for operational blocks not pinned to the start.
+  skip_regexes: []
 
 secrets_regex:
   patterns: [EMAIL, APIKEY, IBAN, PHONE]

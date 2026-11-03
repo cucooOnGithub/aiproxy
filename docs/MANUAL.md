@@ -166,6 +166,8 @@ Key config fields (full list in `config.example.yaml`):
 | `mode` | `fail_closed` (block on filter error) or `fail_open` |
 | `scope.redact_system` | redact the top-level system prompt too? Default `false` — the Claude Code system prompt + CLAUDE.md pass through verbatim |
 | `scope.skip_tags` | tags whose `<tag>…</tag>` regions are never redacted wherever they appear in a message (skills, slash-command text, system reminders, local command output); default list in `config.example.yaml` |
+| `scope.skip_prefixes` | protect a whole text block when its stripped text starts with any of these — catches operational blocks Claude Code injects untagged (`# Environment`, `You are Claude Code`, `Direct output style is active`, `[SUGGESTION MODE`). Every other block (all user **and** assistant turns, plus documents) is redacted, so repeated PII maps to the same token |
+| `scope.skip_regexes` | same as `skip_prefixes` but the block is protected when any regex matches it (`re.search`, DOTALL); for operational blocks not pinned to the start |
 | `anonymizer.entities` | per-type action: `anonymize` / `redact` / `ignore` |
 | `anonymizer.allowlist` | strings never redacted |
 | `anonymizer.denylist` | strings always redacted |

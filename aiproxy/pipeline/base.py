@@ -30,6 +30,19 @@ _SCOPE_DEFAULTS = {
         "local-command-stdout",
         "local-command-stderr",
     ],
+    # A whole text block is protected (never redacted) when its stripped text
+    # STARTS WITH any of these. Catches operational blocks Claude Code injects
+    # untagged into messages. Every other text block — all user and assistant
+    # turns — is redacted normally, so repeated PII maps to the same token.
+    "skip_prefixes": [
+        "# Environment",
+        "You are Claude Code",
+        "Direct output style is active",
+        "[SUGGESTION MODE",
+    ],
+    # Same, but the block is protected when any of these regexes matches it
+    # (re.search, DOTALL). For operational blocks not pinned to the start.
+    "skip_regexes": [],
 }
 
 # Inert placeholder for a protected span while the redacting processors run.
@@ -87,6 +100,10 @@ class Pipeline:
             "redact_system": cfg.get("redact_system",
                                      _SCOPE_DEFAULTS["redact_system"]),
             "skip_tags": cfg.get("skip_tags", _SCOPE_DEFAULTS["skip_tags"]),
+            "skip_prefixes": cfg.get("skip_prefixes",
+                                     _SCOPE_DEFAULTS["skip_prefixes"]),
+            "skip_regexes": cfg.get("skip_regexes",
+                                    _SCOPE_DEFAULTS["skip_regexes"]),
         }
 
     def _mask(self, doc: Document, ctx: SessionContext) -> dict[int, list]:
@@ -94,17 +111,32 @@ class Pipeline:
         processors never touch them. Returns {part_index: [(placeholder,
         original), ...]} to restore after processing.
 
-        Two kinds of span are protected:
-          * the whole top-level system prompt (unless redact_system is true);
-          * any <tag>...</tag> region for a tag in skip_tags, wherever it is
-            injected inside a message (CLAUDE.md, skills, commands, reminders).
-        User-typed prose and attached documents around them stay redactable.
+        A text block is protected WHOLE when it is operational content:
+          * the top-level system prompt (unless redact_system is true);
+          * its stripped text starts with any scope.skip_prefixes entry;
+          * any scope.skip_regexes pattern matches it.
+        Otherwise the block is redacted normally, except that any
+        <tag>...</tag> region for a tag in scope.skip_tags inside it is
+        protected in place (CLAUDE.md, skills, commands, reminders).
+
+        Every real turn (user and assistant) and every attached document is
+        therefore redacted, so repeated PII maps to the same token; only
+        operational blocks pass through verbatim.
         """
         scope = self._scope(ctx)
         tags = [t for t in scope["skip_tags"] if t]
         tag_re = (re.compile(r"<(" + "|".join(re.escape(t) for t in tags)
                              + r")\b[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
                   if tags else None)
+        prefixes = tuple(p for p in scope["skip_prefixes"] if p)
+        regexes = [re.compile(r, re.DOTALL) for r in scope["skip_regexes"] if r]
+
+        def _is_operational(text: str) -> bool:
+            stripped = text.lstrip()
+            if prefixes and stripped.startswith(prefixes):
+                return True
+            return any(r.search(text) for r in regexes)
+
         saved: dict[int, list] = {}
         counter = 0
         for i, part in enumerate(doc.parts):
@@ -113,7 +145,10 @@ class Pipeline:
             is_system = part.origin.get("path") == ("system",)
             spans: list[tuple[str, str]] = []
 
-            if is_system and not scope["redact_system"]:
+            protect_whole = (is_system and not scope["redact_system"]) \
+                or _is_operational(part.text)
+
+            if protect_whole:
                 ph = f"{_KEEP_OPEN}{counter}{_KEEP_CLOSE}"
                 counter += 1
                 spans.append((ph, part.text))

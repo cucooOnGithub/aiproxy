@@ -55,6 +55,14 @@ _WIZARD = [
      "reminders), as a YAML list",
      "[system-reminder, command-name, command-args, command-message, "
      "local-command-stdout, local-command-stderr]"),
+    ("scope.skip_prefixes",
+     "Protect a whole text block when it STARTS WITH any of these (untagged "
+     "operational blocks), as a YAML list",
+     '["# Environment", "You are Claude Code", "Direct output style is active", '
+     '"[SUGGESTION MODE"]'),
+    ("scope.skip_regexes",
+     "Protect a whole text block when any of these regexes matches it "
+     "(re.search, DOTALL), as a YAML list", "[]"),
     ("image_redactor.max_pages", "Max PDF pages", "20"),
     ("image_redactor.dpi", "Scanned-page raster DPI", "200"),
     ("store.path", "Store DB path", "./map.db"),
