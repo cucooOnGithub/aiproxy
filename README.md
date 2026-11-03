@@ -19,19 +19,38 @@ AI tool ──▶ aiproxy ──(redacted)──▶ Anthropic
 
 Full install + usage: [`docs/MANUAL.md`](docs/MANUAL.md).
 
-## Quick start
+## Install (one command)
+The installer sets up the venv + deps, Ollama (and starts it), Tesseract,
+the NER models your config needs, a store key, and `config.yaml`.
+
+**macOS / Linux**
+```bash
+./install.sh
+```
+**Windows (PowerShell)**
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+Then verify and run:
+```bash
+python -m aiproxy doctor --config config.yaml   # check everything is set up
+python -m aiproxy serve  --config config.yaml
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8088  # match listen.port
+```
+
+### Manual quick start (if you skip the installer)
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[media]"
-ollama pull qwen2.5
+pip install -e ".[media]"                    # core; needs the tesseract binary
+ollama pull qwen2.5:3b-instruct
 cp config.example.yaml config.yaml
-export AIPROXY_STORE_KEY="$(python -m aiproxy genkey)"
+export AIPROXY_STORE_KEY="$(python -m aiproxy genkey)"   # if store.encrypt: true
 python -m aiproxy serve --config config.yaml
-# then: export ANTHROPIC_BASE_URL=http://127.0.0.1:8080
 ```
 
 ## Status
-Working, 36 passing tests. Not yet smoke-tested against live providers
+Working, 45 passing tests. Not yet smoke-tested against live providers
 except the local echo round-trip below.
 
 - **Providers**: Anthropic (`/v1/messages`) and OpenAI

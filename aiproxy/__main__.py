@@ -24,6 +24,9 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("genkey", help="print a new store encryption key")
 
+    d = sub.add_parser("doctor", help="check the install is complete/runnable")
+    d.add_argument("--config", default="config.yaml")
+
     args = ap.parse_args(argv)
 
     if args.cmd == "genkey":
@@ -31,6 +34,11 @@ def main(argv: list[str] | None = None) -> int:
 
         print(Fernet.generate_key().decode())
         return 0
+
+    if args.cmd == "doctor":
+        from aiproxy.doctor import main as doctor_main
+
+        return doctor_main(args.config)
 
     from aiproxy.config.loader import load_config
 

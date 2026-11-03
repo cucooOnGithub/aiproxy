@@ -33,29 +33,53 @@ an attacker who already has your local machine or the mapping store.
 
 ## 2. Install
 
-Requires Python ≥ 3.11 and a running local LLM (Ollama recommended).
+Requires Python ≥ 3.11. The installer handles everything else (Ollama,
+Tesseract, models, key, config).
 
+### Automatic (recommended)
+From the repo root:
+
+**macOS / Linux**
+```bash
+./install.sh
+```
+**Windows (PowerShell)**
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+The installer is re-runnable and does:
+1. find Python ≥ 3.11, create `.venv`, install `aiproxy[media]`;
+2. install Tesseract OCR (Homebrew / apt / dnf / pacman / winget);
+3. install Ollama and start it (`:11434`);
+4. create `config.yaml` from the example if missing;
+5. `ollama pull` every model listed in `config.yaml` (`llm.models` or
+   `llm.model`);
+6. if `store.encrypt: true`, generate a key and print the
+   `AIPROXY_STORE_KEY` to export.
+
+System-package steps are best-effort; if one can't auto-install it prints
+the manual command and continues. Then verify with the doctor (§4a).
+
+### Manual
 ```bash
 cd aiproxy
 python -m venv .venv && source .venv/bin/activate
 pip install -e .            # core (text anonymization)
-pip install -e ".[media]"   # add image/PDF redaction
+pip install -e ".[media]"   # add image/PDF/Office redaction
 pip install -e ".[dev]"     # add test deps
 ```
-
-**Local LLM (Ollama):**
+Local LLM (Ollama):
 ```bash
 # install ollama (see ollama.com), then:
-ollama pull qwen2.5
+ollama pull qwen2.5:3b-instruct
 ollama serve     # usually auto-starts; listens on :11434
 ```
-
-**Image/PDF extras** also need the Tesseract OCR binary:
+Image/PDF/Office extras also need the Tesseract OCR binary:
 ```bash
-# Debian/Kali/Ubuntu
-sudo apt install tesseract-ocr
-# macOS
-brew install tesseract
+sudo apt install tesseract-ocr     # Debian/Kali/Ubuntu
+brew install tesseract             # macOS
+winget install UB-Mannheim.TesseractOCR   # Windows
 ```
 
 ---
@@ -96,11 +120,24 @@ Key config fields (full list in `config.example.yaml`):
 
 ---
 
+## 4a. Doctor — verify the setup
+
+Before (or any time after) running, check everything is in place:
+```bash
+python -m aiproxy doctor --config config.yaml
+```
+It verifies Python, dependencies, the Tesseract binary, config load, the
+store (and `AIPROXY_STORE_KEY` when `store.encrypt: true`), the archive dir
+(if set), Ollama reachability, and that every model in the config is pulled.
+Required failures exit non-zero; optional gaps (e.g. missing Tesseract) are
+`WARN`. Example line: `[FAIL] model pulled: qwen2.5:3b-instruct — run:
+ollama pull qwen2.5:3b-instruct`.
+
 ## 4. Run
 
 ```bash
 python -m aiproxy serve --config config.yaml
-# listening on http://127.0.0.1:8080
+# listening on http://127.0.0.1:8088   (per listen.port)
 ```
 
 Health check: `curl http://127.0.0.1:8080/healthz`
