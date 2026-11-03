@@ -22,6 +22,14 @@ from aiproxy.metrics import METRICS
 from aiproxy.pipeline.base import Processor, SessionContext
 from aiproxy.processors.tokens import TOKEN_RE, make_token
 
+import re as _re_mod
+
+# Deterministic email catch for the Office path: embedded document text never
+# passes through secrets_regex (that runs on plain-text parts only), so the
+# small NER model is otherwise the only thing catching emails in a .docx and
+# it misses some. This guarantees every well-formed email is tokenized.
+_EMAIL_RE = _re_mod.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+
 
 class AnonymizerError(RuntimeError):
     pass
@@ -178,7 +186,15 @@ class Anonymizer(Processor):
                 if m.group(3).strip():
                     inners.append(m.group(3))
 
-        ents: list[Entity] = self._detect("\n".join(inners)) if inners else []
+        joined = "\n".join(inners)
+        ents: list[Entity] = self._detect(joined) if inners else []
+        # Deterministic email catch (regex) in addition to NER, so emails in
+        # the document body are always tokenized even when the model misses
+        # them. Deduped against emails NER already found.
+        seen = {e.text for e in ents}
+        ents += [Entity(m.group(0), "EMAIL")
+                 for m in _EMAIL_RE.finditer(joined)
+                 if m.group(0) not in seen]
 
         def repl(m: "_re.Match") -> str:
             inner = m.group(3)
