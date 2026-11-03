@@ -18,7 +18,7 @@ from __future__ import annotations
 import io
 
 from aiproxy.document import Document, Part, PartKind
-from aiproxy.llm.ollama_ner import OllamaNER
+from aiproxy.llm.ollama_ner import build_ner
 from aiproxy.pipeline.base import Processor, SessionContext
 
 
@@ -29,12 +29,7 @@ class ImageRedactor(Processor):
     def __init__(self, config: dict):
         super().__init__(config)
         llm = config.get("llm", {})
-        self.ner = OllamaNER(
-            url=llm.get("url", "http://localhost:11434"),
-            model=llm.get("model", "qwen2.5"),
-            timeout=llm.get("timeout", 60.0),
-            warm_timeout=llm.get("warm_timeout", 300.0),
-        )
+        self.ner = build_ner(llm)
         self.max_pages = config.get("max_pages", 20)
         self.dpi = config.get("dpi", 200)  # raster resolution for scanned pages
 

@@ -48,12 +48,21 @@ class Entity:
 
 class OllamaNER:
     def __init__(self, url: str, model: str, timeout: float = 60.0,
-                 warm_timeout: float = 300.0):
+                 warm_timeout: float = 300.0, keep_alive=None):
         self.url = url.rstrip("/")
         self.model = model
         self.timeout = timeout          # per-detect() request budget
         self.warm_timeout = warm_timeout  # longer; covers cold model load
+        # Ollama keep_alive: how long the model stays resident after a call.
+        # Set 0 (or "0s") so an ensemble unloads each model before loading
+        # the next on a VRAM-tight GPU. None = Ollama default (5m).
+        self.keep_alive = keep_alive
         self._cache: dict[str, list[Entity]] = {}
+
+    def _ka(self, body: dict) -> dict:
+        if self.keep_alive is not None:
+            body["keep_alive"] = self.keep_alive
+        return body
 
     def warm(self) -> None:
         """Force the model to load now (blocking) so the first real detect()
@@ -61,8 +70,8 @@ class OllamaNER:
         timeout. Safe to call repeatedly; errors propagate to the caller."""
         httpx.post(
             f"{self.url}/api/chat",
-            json={"model": self.model, "stream": False,
-                  "messages": [{"role": "user", "content": "ok"}]},
+            json=self._ka({"model": self.model, "stream": False,
+                           "messages": [{"role": "user", "content": "ok"}]}),
             timeout=self.warm_timeout,
         ).raise_for_status()
 
@@ -75,14 +84,14 @@ class OllamaNER:
 
         resp = httpx.post(
             f"{self.url}/api/chat",
-            json={
+            json=self._ka({
                 "model": self.model,
                 "format": _SCHEMA,
                 "stream": False,
                 "messages": [
                     {"role": "user", "content": _PROMPT.format(text=text)}
                 ],
-            },
+            }),
             timeout=self.timeout,
         )
         resp.raise_for_status()
@@ -96,3 +105,60 @@ class OllamaNER:
             ents = []
         self._cache[key] = ents
         return ents
+
+
+class MultiNER:
+    """Run several NER backends and UNION their entities (higher recall).
+
+    Same duck-typed shape as OllamaNER (detect/warm/model) so the
+    anonymizer treats it identically. Dedupe is by normalized text; a
+    non-OTHER type wins over OTHER when the same text is seen twice.
+
+    Cost: latency is the SUM of all backends, and holding several models
+    on a small GPU makes Ollama load/unload (thrash). Order the list
+    cheap-model-first.
+    """
+
+    def __init__(self, backends: list[OllamaNER]):
+        if not backends:
+            raise ValueError("MultiNER needs at least one backend")
+        self.backends = backends
+        self.model = "+".join(b.model for b in backends)
+
+    def warm(self) -> None:
+        for b in self.backends:
+            b.warm()
+
+    def detect(self, text: str) -> list[Entity]:
+        best: dict[str, Entity] = {}
+        for b in self.backends:
+            for e in b.detect(text):
+                k = e.text.strip().lower()
+                if not k:
+                    continue
+                prev = best.get(k)
+                if prev is None or (prev.type == "OTHER" and e.type != "OTHER"):
+                    best[k] = e
+        return list(best.values())
+
+
+def build_ner(llm: dict) -> "OllamaNER | MultiNER":
+    """Construct the NER backend from the `llm` config block.
+
+    - `models: [a, b, ...]` -> MultiNER union over those models
+    - `model: x` (or neither) -> a single OllamaNER
+    Timeouts/url are shared across all backends.
+    """
+    url = llm.get("url", "http://localhost:11434")
+    timeout = llm.get("timeout", 60.0)
+    warm_timeout = llm.get("warm_timeout", 300.0)
+    keep_alive = llm.get("keep_alive")
+
+    def _one(model: str) -> OllamaNER:
+        return OllamaNER(url=url, model=model, timeout=timeout,
+                         warm_timeout=warm_timeout, keep_alive=keep_alive)
+
+    models = llm.get("models")
+    if models:
+        return MultiNER([_one(m) for m in models])
+    return _one(llm.get("model", "qwen2.5"))

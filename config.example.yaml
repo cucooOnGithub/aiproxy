@@ -19,9 +19,15 @@ upstreams:
 # Shared local-LLM used by anonymizer + image_redactor for NER.
 llm:
   url: http://localhost:11434   # Ollama
-  model: qwen2.5
+  # Pick ONE of:
+  #   model: llama3.2:latest        # single model
+  #   models: [m1, m2]              # ensemble: union entities (higher recall,
+  #                                 # latency = sum, may thrash GPU VRAM)
+  model: qwen2.5:3b-instruct
   timeout: 60          # seconds per NER request (model-load counts here)
   warm_timeout: 300    # seconds allowed for the startup pre-warm cold load
+  # keep_alive: 0      # unload model after each call; needed for an ensemble
+                       # on a VRAM-tight GPU (else models thrash / OOM)
 
 # Load the local model at startup so the first request doesn't hit the
 # cold-load cost against `llm.timeout`. Set false to skip.

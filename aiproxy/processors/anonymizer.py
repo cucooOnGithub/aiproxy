@@ -17,7 +17,7 @@ Config:
 from __future__ import annotations
 
 from aiproxy.document import Document, PartKind
-from aiproxy.llm.ollama_ner import Entity, OllamaNER
+from aiproxy.llm.ollama_ner import Entity, build_ner
 from aiproxy.pipeline.base import Processor, SessionContext
 from aiproxy.processors.tokens import TOKEN_RE, make_token
 
@@ -33,12 +33,7 @@ class Anonymizer(Processor):
     def __init__(self, config: dict):
         super().__init__(config)
         llm = config.get("llm", {})
-        self.ner = OllamaNER(
-            url=llm.get("url", "http://localhost:11434"),
-            model=llm.get("model", "qwen2.5"),
-            timeout=llm.get("timeout", 60.0),
-            warm_timeout=llm.get("warm_timeout", 300.0),
-        )
+        self.ner = build_ner(llm)
         self.actions: dict[str, str] = config.get("entities", {})
         self.allow = set(config.get("allowlist", []))
         self.deny = set(config.get("denylist", []))
