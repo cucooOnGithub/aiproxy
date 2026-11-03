@@ -90,6 +90,22 @@ winget install UB-Mannheim.TesseractOCR   # Windows
 cp config.example.yaml config.yaml
 ```
 
+### Editing settings with `aiproxy config`
+Change any setting without hand-editing YAML (comments are preserved; every
+write is validated and rejected if it would break the config):
+```bash
+aiproxy config show                         # print the whole config
+aiproxy config get llm.model
+aiproxy config set listen.port 9000         # parsed as int
+aiproxy config set store.encrypt true       # parsed as bool
+aiproxy config set llm.models '[qwen2.5:3b-instruct, llama3.2:latest]'
+aiproxy config set anonymizer.entities.PERSON redact
+aiproxy config unset llm.models
+aiproxy config edit                         # interactive wizard
+```
+Values are parsed as YAML, so types are inferred (`9000`→int, `true`→bool,
+`null`→None, `[a, b]`→list). `--config PATH` targets a non-default file.
+
 Generate and export the store encryption key (required when
 `store.encrypt: true`):
 ```bash

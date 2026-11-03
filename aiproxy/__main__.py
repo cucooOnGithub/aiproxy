@@ -27,7 +27,25 @@ def main(argv: list[str] | None = None) -> int:
     d = sub.add_parser("doctor", help="check the install is complete/runnable")
     d.add_argument("--config", default="config.yaml")
 
+    c = sub.add_parser("config", help="view/change settings in config.yaml")
+    c.add_argument("--config", default="config.yaml")
+    csub = c.add_subparsers(dest="action", required=True)
+    csub.add_parser("show", help="print the whole config")
+    cg = csub.add_parser("get", help="print one value")
+    cg.add_argument("path")
+    cse = csub.add_parser("set", help="set one value (parsed as YAML)")
+    cse.add_argument("path")
+    cse.add_argument("value")
+    cu = csub.add_parser("unset", help="remove one key")
+    cu.add_argument("path")
+    csub.add_parser("edit", help="interactive wizard over common settings")
+
     args = ap.parse_args(argv)
+
+    if args.cmd == "config":
+        from aiproxy.config_cli import main as config_main
+
+        return config_main(args)
 
     if args.cmd == "genkey":
         from cryptography.fernet import Fernet
