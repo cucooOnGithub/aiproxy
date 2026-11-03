@@ -12,7 +12,10 @@ token-by-token (see stream.py); otherwise the JSON path below is used.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import logging
+from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request, Response
@@ -49,35 +52,38 @@ def _session_id(req: Request, body: dict) -> str:
     return hashlib.sha256(seed.encode()).hexdigest()[:16]
 
 
+async def _prewarm(pipeline, cfg: dict) -> None:
+    """Load each processor's local model before serving, so the first
+    request doesn't pay the cold-load cost against the per-request timeout.
+    Controlled by `prewarm: true` (default). A warm failure is logged, not
+    fatal — the model may just not be up yet."""
+    if not cfg.get("prewarm", True):
+        return
+    seen = set()
+    for p in pipeline.processors:
+        ner = getattr(p, "ner", None)
+        if ner is None or id(ner) in seen:
+            continue
+        seen.add(id(ner))
+        try:
+            await asyncio.to_thread(ner.warm)
+            logging.getLogger("aiproxy").info("prewarmed %s", ner.model)
+        except Exception as e:  # noqa: BLE001
+            logging.getLogger("aiproxy").warning(
+                "prewarm of %s failed: %s", ner.model, e)
+
+
 def create_app(cfg: dict) -> FastAPI:
-    app = FastAPI(title="aiproxy")
     store = _build_store(cfg)
     pipeline = build_pipeline(cfg["pipeline"], cfg)
     upstreams = cfg["upstreams"]
 
-    @app.on_event("startup")
-    async def _prewarm():
-        """Load each processor's local model before serving, so the first
-        request doesn't pay the cold-load cost against the per-request
-        timeout. Controlled by `prewarm: true` (default). A warm failure is
-        logged, not fatal — the model may just not be up yet."""
-        if not cfg.get("prewarm", True):
-            return
-        import asyncio
-        import logging
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        await _prewarm(pipeline, cfg)
+        yield
 
-        seen = set()
-        for p in pipeline.processors:
-            ner = getattr(p, "ner", None)
-            if ner is None or id(ner) in seen:
-                continue
-            seen.add(id(ner))
-            try:
-                await asyncio.to_thread(ner.warm)
-                logging.getLogger("aiproxy").info("prewarmed %s", ner.model)
-            except Exception as e:  # noqa: BLE001
-                logging.getLogger("aiproxy").warning(
-                    "prewarm of %s failed: %s", ner.model, e)
+    app = FastAPI(title="aiproxy", lifespan=lifespan)
 
     @app.post("/v1/messages")
     async def messages(req: Request):
