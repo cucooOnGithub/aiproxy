@@ -15,30 +15,41 @@ from dataclasses import dataclass
 
 import httpx
 
-_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "entities": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "text": {"type": "string"},
-                    "type": {"type": "string"},
-                },
-                "required": ["text", "type"],
-            },
-        }
-    },
-    "required": ["entities"],
-}
+_DEFAULT_TYPES = ["PERSON", "ORG", "LOCATION", "EMAIL", "PHONE"]
 
-_PROMPT = (
+# Default prompt template. Placeholders: {types} (comma list) and {text}.
+# A custom llm.prompt MUST contain {text}; {types} is optional.
+_DEFAULT_PROMPT = (
     "You are a PII detector. Find every person name, organization/company "
     "name, location, email, and phone number in the text. Return JSON only. "
-    "Use types: PERSON, ORG, LOCATION, EMAIL, PHONE. Copy the entity text "
-    "exactly as it appears. Text:\n\n{text}"
+    "Use types: {types}. Copy the entity text exactly as it appears. "
+    "Text:\n\n{text}"
 )
+
+
+def _build_schema(entity_types: list[str]) -> dict:
+    """JSON schema for the response; constrain `type` to the configured
+    entity types (an enum helps the model stay on-label)."""
+    type_schema = {"type": "string"}
+    if entity_types:
+        type_schema["enum"] = list(entity_types)
+    return {
+        "type": "object",
+        "properties": {
+            "entities": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string"},
+                        "type": type_schema,
+                    },
+                    "required": ["text", "type"],
+                },
+            }
+        },
+        "required": ["entities"],
+    }
 
 
 @dataclass
@@ -50,9 +61,16 @@ class Entity:
 class OllamaNER:
     def __init__(self, url: str, model: str, timeout: float = 60.0,
                  warm_timeout: float = 300.0, keep_alive=None,
-                 cache_ttl: float | None = 3600.0):
+                 cache_ttl: float | None = 3600.0,
+                 entity_types: list[str] | None = None,
+                 prompt: str | None = None):
         self.url = url.rstrip("/")
         self.model = model
+        self.entity_types = list(entity_types) if entity_types else list(_DEFAULT_TYPES)
+        self.prompt = prompt or _DEFAULT_PROMPT
+        if "{text}" not in self.prompt:
+            raise ValueError("llm.prompt must contain the {text} placeholder")
+        self._schema = _build_schema(self.entity_types)
         self.timeout = timeout          # per-detect() request budget
         self.warm_timeout = warm_timeout  # longer; covers cold model load
         # Ollama keep_alive: how long the model stays resident after a call.
@@ -96,10 +114,11 @@ class OllamaNER:
             f"{self.url}/api/chat",
             json=self._ka({
                 "model": self.model,
-                "format": _SCHEMA,
+                "format": self._schema,
                 "stream": False,
                 "messages": [
-                    {"role": "user", "content": _PROMPT.format(text=text)}
+                    {"role": "user", "content": self.prompt.format(
+                        types=", ".join(self.entity_types), text=text)}
                 ],
             }),
             timeout=self.timeout,
@@ -164,11 +183,14 @@ def build_ner(llm: dict) -> "OllamaNER | MultiNER":
     warm_timeout = llm.get("warm_timeout", 300.0)
     keep_alive = llm.get("keep_alive")
     cache_ttl = llm.get("cache_ttl", 3600.0)
+    entity_types = llm.get("entity_types")
+    prompt = llm.get("prompt")
 
     def _one(model: str) -> OllamaNER:
         return OllamaNER(url=url, model=model, timeout=timeout,
                          warm_timeout=warm_timeout, keep_alive=keep_alive,
-                         cache_ttl=cache_ttl)
+                         cache_ttl=cache_ttl, entity_types=entity_types,
+                         prompt=prompt)
 
     models = llm.get("models")
     if models:

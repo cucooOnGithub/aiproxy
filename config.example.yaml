@@ -30,6 +30,14 @@ llm:
                        # on a VRAM-tight GPU (else models thrash / OOM)
   cache_ttl: 3600      # seconds to keep in-memory NER results (null = forever);
                        # a reloaded model never re-runs NER on cached text
+  # Entity types the model may return (also enum-constrains the JSON schema).
+  # Add a custom type here AND give it an action under `anonymizer.entities`.
+  entity_types: [PERSON, ORG, LOCATION, EMAIL, PHONE]
+  # Override the NER prompt. MUST contain {text}; {types} is optional and is
+  # filled from entity_types above. Default detects the standard PII types.
+  # prompt: |
+  #   You are a PII detector. Find every {types} in the text. Return JSON
+  #   only. Copy the entity text exactly as it appears. Text:\n\n{text}
 
 # Load the local model at startup so the first request doesn't hit the
 # cold-load cost against `llm.timeout`. Set false to skip.

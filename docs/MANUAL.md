@@ -81,6 +81,9 @@ Key config fields (full list in `config.example.yaml`):
 | `listen` | host/port aiproxy binds to |
 | `upstreams.<provider>.base_url` | real API aiproxy forwards to (override with env `AIPROXY_UPSTREAM_<PROVIDER>`, e.g. `AIPROXY_UPSTREAM_ANTHROPIC`; env wins and can add a provider) |
 | `llm.url` / `llm.model` | local Ollama endpoint + model for NER |
+| `llm.entity_types` | entity labels the model may return; enum-constrains the schema (default `PERSON, ORG, LOCATION, EMAIL, PHONE`). Add a custom type's action under `anonymizer.entities` too |
+| `llm.prompt` | override the NER prompt; must contain `{text}`, optional `{types}` filled from `entity_types` |
+| `llm.cache_ttl` | seconds to keep in-memory NER results (`null` = forever) |
 | `llm.timeout` | seconds per NER request (default 60; model-load counts toward it) |
 | `llm.warm_timeout` | seconds allowed for the startup pre-warm cold load (default 300) |
 | `prewarm` | load the model at startup so the first request skips the cold-load cost (default true) |
