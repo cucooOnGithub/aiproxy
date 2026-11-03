@@ -99,6 +99,14 @@ anonymizer:
     PHONE: anonymize
   allowlist: []     # strings never redacted (e.g. your own company)
   denylist: []      # strings always redacted
+  # Known-name gazetteer: a file of name PARTS (one per line, given names and
+  # surnames mixed). Adjacent capitalized tokens whose lowercase form is in
+  # the file are joined into one PERSON (e.g. Maria + Silva -> Maria Silva),
+  # giving deterministic name recall for names the LLM misses. Blank = off.
+  # name_gazetteer: ./names.txt
+  # Shortest run of adjacent known parts that counts as a name (default 1).
+  # Set 2 to only mask multi-part names and avoid masking lone first names.
+  # name_gazetteer_min_parts: 1
 
 image_redactor:
   max_pages: 20

@@ -1,0 +1,8 @@
+# Name gazetteer: one name PART per line (given names and surnames mixed).
+# Matching is case-insensitive but requires the occurrence to be capitalized,
+# and joins adjacent known parts into one name (e.g. Maria + Silva).
+# Lines starting with # and blank lines are ignored.
+john
+rivera
+maria
+silva

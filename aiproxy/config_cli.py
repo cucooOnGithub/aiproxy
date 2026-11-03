@@ -64,6 +64,12 @@ _WIZARD = [
     ("scope.skip_regexes",
      "Protect a whole text block when any of these regexes matches it "
      "(re.search, DOTALL), as a YAML list", "[]"),
+    ("anonymizer.name_gazetteer",
+     "Path to a known-name list (one name part per line; blank = off)",
+     "./names.txt"),
+    ("anonymizer.name_gazetteer_min_parts",
+     "Min adjacent known parts to count as a name (1=lone names, 2=multi only)",
+     "1"),
     ("image_redactor.max_pages", "Max PDF pages", "20"),
     ("image_redactor.dpi", "Scanned-page raster DPI", "200"),
     ("store.path", "Store DB path", "./map.db"),

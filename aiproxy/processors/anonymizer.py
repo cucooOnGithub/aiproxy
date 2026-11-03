@@ -47,6 +47,45 @@ class Anonymizer(Processor):
         self.allow = set(config.get("allowlist", []))
         self.deny = set(config.get("denylist", []))
         self.mode = config.get("mode", "fail_closed")
+        # Optional name gazetteer: a file of known name PARTS (one per line,
+        # given names and surnames mixed). Adjacent capitalized tokens whose
+        # lowercase form is in the set are joined into one PERSON entity, so
+        # "Maria" + "Silva" -> "Maria Silva". Deterministic recall boost for
+        # names the LLM misses. min_parts sets the shortest run that counts.
+        self.gazetteer = self._load_gazetteer(config.get("name_gazetteer"))
+        self.gaz_min_parts = max(1, int(config.get("name_gazetteer_min_parts", 1)))
+
+    @staticmethod
+    def _load_gazetteer(path) -> set[str]:
+        if not path:
+            return set()
+        try:
+            with open(path, encoding="utf-8") as f:
+                return {ln.strip().lower() for ln in f
+                        if ln.strip() and not ln.lstrip().startswith("#")}
+        except OSError:
+            return set()
+
+    def _gazetteer_entities(self, text: str) -> list[Entity]:
+        """Join runs of adjacent capitalized, known name-parts into PERSON
+        entities. Requires title/upper-case to avoid matching lowercase words
+        that happen to share a name's spelling."""
+        if not self.gazetteer:
+            return []
+        import re as _re
+        out: list[Entity] = []
+        run: list[str] = []
+        for tok in _re.finditer(r"\S+", text):
+            core = tok.group(0).strip(".,;:!?\"'()[]{}<>«»…")
+            if core[:1].isupper() and core.lower() in self.gazetteer:
+                run.append(core)
+            else:
+                if len(run) >= self.gaz_min_parts:
+                    out.append(Entity(" ".join(run), "PERSON"))
+                run = []
+        if len(run) >= self.gaz_min_parts:
+            out.append(Entity(" ".join(run), "PERSON"))
+        return out
 
     def _seq(self, ctx: SessionContext) -> int:
         n = getattr(ctx, "_seq_counter", 0) + 1
@@ -60,6 +99,7 @@ class Anonymizer(Processor):
         """NER + denylist entities. Raises on NER failure (caller decides)."""
         ents = list(self.ner.detect(text))
         ents += [Entity(d, "OTHER") for d in self.deny if d in text]
+        ents += self._gazetteer_entities(text)
         return ents
 
     def _tokenize(self, text: str, ents: list[Entity],

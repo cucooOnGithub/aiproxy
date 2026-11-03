@@ -170,7 +170,9 @@ Key config fields (full list in `config.example.yaml`):
 | `scope.skip_regexes` | same as `skip_prefixes` but the block is protected when any regex matches it (`re.search`, DOTALL); for operational blocks not pinned to the start |
 | `anonymizer.entities` | per-type action: `anonymize` / `redact` / `ignore` |
 | `anonymizer.allowlist` | strings never redacted |
-| `anonymizer.denylist` | strings always redacted |
+| `anonymizer.denylist` | strings always redacted (exact full-string match) |
+| `anonymizer.name_gazetteer` | path to a file of known name **parts** (one per line, given names + surnames). Adjacent capitalized tokens whose lowercase form is in the file are joined into one PERSON (`Maria` + `Silva` → `Maria Silva`) and tokenized, even when the LLM misses them. Applies to plain text and Office docs. Blank/omitted = off |
+| `anonymizer.name_gazetteer_min_parts` | shortest run of adjacent known parts that counts as a name (default `1`; set `2` to mask only multi-part names and avoid masking a lone first name that doubles as a common word) |
 | `store.encrypt` | encrypt originals at rest (needs `AIPROXY_STORE_KEY`) |
 | `redaction_log.debug` | also log the original (plaintext) message text alongside the redacted version — real PII on disk; leave `false` outside a trusted env |
 | `redaction_log.log_all` | log **every** text block, not just the ones that were redacted (default `false`); operational blocks still appear as placeholders unless `mode: observe` |
