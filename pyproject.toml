@@ -25,6 +25,10 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
 ]
+# Build a standalone binary (see aiproxy.spec / build.sh / build.ps1).
+build = [
+    "pyinstaller>=6.0",
+]
 
 [project.scripts]
 aiproxy = "aiproxy.__main__:main"

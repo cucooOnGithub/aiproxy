@@ -39,6 +39,17 @@ python -m aiproxy serve  --config config.yaml
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8088  # match listen.port
 ```
 
+### Build a standalone binary (optional)
+Produce one self-contained executable (no Python needed to run it):
+```bash
+./build.sh                                        # -> dist/aiproxy  (macOS/Linux)
+powershell -ExecutionPolicy Bypass -File .\build.ps1   # -> dist\aiproxy.exe (Windows)
+./dist/aiproxy serve --config config.yaml
+```
+PyInstaller can't cross-compile — build on each target OS. Tesseract and
+Ollama are **not** bundled; install them as above. Details in
+[docs/MANUAL.md](docs/MANUAL.md#build-a-standalone-binary-optional).
+
 ### Manual quick start (if you skip the installer)
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -83,6 +94,19 @@ aiproxy/llm/          Ollama NER client, MultiNER ensemble, build_ner
 aiproxy/config/       YAML loader (+ AIPROXY_UPSTREAM_* env overrides)
 docs/MANUAL.md        install + usage + extending
 ```
+
+## Why use it
+
+Hide confidential data (customer PII, client/NDA names, secrets, IP) from
+hosted LLM providers while still using AI tools. Business and compliance
+rationale (GDPR/minimization, pseudonymization, honest limits): see
+[docs/BUSINESS_JUSTIFICATION.md](docs/BUSINESS_JUSTIFICATION.md).
+
+## Support
+
+If aiproxy helps you, you can
+[buy me a coffee](https://www.buymeacoffee.com/YOUR_HANDLE) (replace
+`YOUR_HANDLE` with your Buy Me a Coffee username).
 
 ## License
 

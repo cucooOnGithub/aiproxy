@@ -1,7 +1,10 @@
 __pycache__/
 *.pyc
 .venv/
+.venv-build/
 venv/
+*.pyc
+*.spec.bak
 config.yaml
 *.db
 *.db-journal

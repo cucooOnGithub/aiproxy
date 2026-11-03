@@ -82,6 +82,35 @@ brew install tesseract             # macOS
 winget install UB-Mannheim.TesseractOCR   # Windows
 ```
 
+### Build a standalone binary (optional)
+
+Produce a single self-contained `aiproxy` executable (no Python install
+needed to run it) with PyInstaller:
+
+**macOS / Linux**
+```bash
+./build.sh
+# -> dist/aiproxy
+```
+**Windows (PowerShell)**
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build.ps1
+# -> dist\aiproxy.exe
+```
+
+The scripts create a throwaway `.venv-build`, install `aiproxy[media]` +
+PyInstaller, and run `pyinstaller --clean --noconfirm aiproxy.spec`. Run the
+result like the CLI: `./dist/aiproxy serve --config config.yaml`.
+
+Important:
+- **PyInstaller cannot cross-compile.** Build on each OS you need a binary
+  for (a macOS binary must be built on macOS, etc.), or in CI.
+- **Tesseract OCR and Ollama are NOT bundled** — they are separate programs
+  aiproxy shells out to. Install them on the host as in §2 regardless.
+- The binary bundles Python, all pip dependencies, and pypdfium2's native
+  PDFium library (~50–60 MB). It does not auto-start on boot and does not
+  create `config.yaml` — ship a config beside it or pass `--config`.
+
 ---
 
 ## 3. Configure
