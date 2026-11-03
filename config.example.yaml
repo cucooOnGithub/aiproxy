@@ -1,0 +1,55 @@
+# aiproxy configuration. Copy to config.yaml and edit.
+
+listen:
+  host: 127.0.0.1
+  port: 8080
+
+# Where redacted requests are forwarded. The proxy mimics each provider's
+# API, so point your AI tool at http://127.0.0.1:8080 instead of these.
+# Override any base_url without editing this file via env:
+#   AIPROXY_UPSTREAM_ANTHROPIC=https://api.anthropic.com
+#   AIPROXY_UPSTREAM_OPENAI=http://127.0.0.1:9000   # e.g. another proxy
+# The env value wins; a provider named only in env is added automatically.
+upstreams:
+  anthropic:
+    base_url: https://api.anthropic.com
+  openai:
+    base_url: https://api.openai.com
+
+# Shared local-LLM used by anonymizer + image_redactor for NER.
+llm:
+  url: http://localhost:11434   # Ollama
+  model: qwen2.5
+
+# Ordered list of processors. Request path runs top->bottom;
+# response path (restoration) runs bottom->top.
+pipeline:
+  - logger
+  - secrets_regex
+  - anonymizer
+  - image_redactor
+
+# fail_closed: block the send if a filter errors (never leak).
+# fail_open:   send original content if a filter errors (risky).
+mode: fail_closed
+
+secrets_regex:
+  patterns: [EMAIL, APIKEY, IBAN, PHONE]
+
+anonymizer:
+  entities:
+    PERSON: anonymize
+    ORG: anonymize
+    LOCATION: ignore
+    EMAIL: anonymize
+    PHONE: anonymize
+  allowlist: []     # strings never redacted (e.g. your own company)
+  denylist: []      # strings always redacted
+
+image_redactor:
+  max_pages: 20
+
+store:
+  backend: sqlite
+  path: ./map.db
+  encrypt: true     # requires env AIPROXY_STORE_KEY (python -m aiproxy genkey)
