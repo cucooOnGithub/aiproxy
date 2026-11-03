@@ -20,6 +20,12 @@ upstreams:
 llm:
   url: http://localhost:11434   # Ollama
   model: qwen2.5
+  timeout: 60          # seconds per NER request (model-load counts here)
+  warm_timeout: 300    # seconds allowed for the startup pre-warm cold load
+
+# Load the local model at startup so the first request doesn't hit the
+# cold-load cost against `llm.timeout`. Set false to skip.
+prewarm: true
 
 # Ordered list of processors. Request path runs top->bottom;
 # response path (restoration) runs bottom->top.

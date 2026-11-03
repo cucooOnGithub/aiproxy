@@ -47,11 +47,24 @@ class Entity:
 
 
 class OllamaNER:
-    def __init__(self, url: str, model: str, timeout: float = 60.0):
+    def __init__(self, url: str, model: str, timeout: float = 60.0,
+                 warm_timeout: float = 300.0):
         self.url = url.rstrip("/")
         self.model = model
-        self.timeout = timeout
+        self.timeout = timeout          # per-detect() request budget
+        self.warm_timeout = warm_timeout  # longer; covers cold model load
         self._cache: dict[str, list[Entity]] = {}
+
+    def warm(self) -> None:
+        """Force the model to load now (blocking) so the first real detect()
+        doesn't pay the cold-load cost against the shorter per-request
+        timeout. Safe to call repeatedly; errors propagate to the caller."""
+        httpx.post(
+            f"{self.url}/api/chat",
+            json={"model": self.model, "stream": False,
+                  "messages": [{"role": "user", "content": "ok"}]},
+            timeout=self.warm_timeout,
+        ).raise_for_status()
 
     def detect(self, text: str) -> list[Entity]:
         if not text.strip():

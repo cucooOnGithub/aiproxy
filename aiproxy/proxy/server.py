@@ -55,6 +55,30 @@ def create_app(cfg: dict) -> FastAPI:
     pipeline = build_pipeline(cfg["pipeline"], cfg)
     upstreams = cfg["upstreams"]
 
+    @app.on_event("startup")
+    async def _prewarm():
+        """Load each processor's local model before serving, so the first
+        request doesn't pay the cold-load cost against the per-request
+        timeout. Controlled by `prewarm: true` (default). A warm failure is
+        logged, not fatal — the model may just not be up yet."""
+        if not cfg.get("prewarm", True):
+            return
+        import asyncio
+        import logging
+
+        seen = set()
+        for p in pipeline.processors:
+            ner = getattr(p, "ner", None)
+            if ner is None or id(ner) in seen:
+                continue
+            seen.add(id(ner))
+            try:
+                await asyncio.to_thread(ner.warm)
+                logging.getLogger("aiproxy").info("prewarmed %s", ner.model)
+            except Exception as e:  # noqa: BLE001
+                logging.getLogger("aiproxy").warning(
+                    "prewarm of %s failed: %s", ner.model, e)
+
     @app.post("/v1/messages")
     async def messages(req: Request):
         return await _handle(req, "anthropic", "/v1/messages")

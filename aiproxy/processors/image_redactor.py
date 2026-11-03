@@ -32,6 +32,8 @@ class ImageRedactor(Processor):
         self.ner = OllamaNER(
             url=llm.get("url", "http://localhost:11434"),
             model=llm.get("model", "qwen2.5"),
+            timeout=llm.get("timeout", 60.0),
+            warm_timeout=llm.get("warm_timeout", 300.0),
         )
         self.max_pages = config.get("max_pages", 20)
         self.dpi = config.get("dpi", 200)  # raster resolution for scanned pages

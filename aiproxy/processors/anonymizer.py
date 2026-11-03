@@ -36,6 +36,8 @@ class Anonymizer(Processor):
         self.ner = OllamaNER(
             url=llm.get("url", "http://localhost:11434"),
             model=llm.get("model", "qwen2.5"),
+            timeout=llm.get("timeout", 60.0),
+            warm_timeout=llm.get("warm_timeout", 300.0),
         )
         self.actions: dict[str, str] = config.get("entities", {})
         self.allow = set(config.get("allowlist", []))

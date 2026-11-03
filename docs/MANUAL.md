@@ -81,6 +81,9 @@ Key config fields (full list in `config.example.yaml`):
 | `listen` | host/port aiproxy binds to |
 | `upstreams.<provider>.base_url` | real API aiproxy forwards to (override with env `AIPROXY_UPSTREAM_<PROVIDER>`, e.g. `AIPROXY_UPSTREAM_ANTHROPIC`; env wins and can add a provider) |
 | `llm.url` / `llm.model` | local Ollama endpoint + model for NER |
+| `llm.timeout` | seconds per NER request (default 60; model-load counts toward it) |
+| `llm.warm_timeout` | seconds allowed for the startup pre-warm cold load (default 300) |
+| `prewarm` | load the model at startup so the first request skips the cold-load cost (default true) |
 | `pipeline` | ordered processor list (request top→bottom, restore bottom→top) |
 | `mode` | `fail_closed` (block on filter error) or `fail_open` |
 | `anonymizer.entities` | per-type action: `anonymize` / `redact` / `ignore` |
