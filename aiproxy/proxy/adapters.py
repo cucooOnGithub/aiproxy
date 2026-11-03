@@ -68,11 +68,12 @@ class AnthropicAdapter(Adapter):
             data = base64.b64decode(src.get("data", "")) if src.get("data") else None
             return Part(PartKind.IMAGE, data=data,
                         media_type=src.get("media_type"), origin={"path": path})
-        if btype == "document":  # PDF
+        if btype == "document":  # PDF or OOXML office doc
             src = block.get("source", {})
             data = base64.b64decode(src.get("data", "")) if src.get("data") else None
-            return Part(PartKind.PDF, data=data,
-                        media_type=src.get("media_type"), origin={"path": path})
+            mt = src.get("media_type") or ""
+            kind = PartKind.OFFICE if _is_office(mt) else PartKind.PDF
+            return Part(kind, data=data, media_type=mt, origin={"path": path})
         # Unknown block: keep as inert text so it round-trips untouched.
         return Part(PartKind.TEXT, text="", origin={"path": path, "inert": True})
 
@@ -117,6 +118,17 @@ class AnthropicAdapter(Adapter):
             _, ci = part.origin["path"]
             body["content"][ci]["text"] = part.text
         return body
+
+
+_OFFICE_TYPES = frozenset({
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+})
+
+
+def _is_office(media_type: str) -> bool:
+    return media_type in _OFFICE_TYPES
 
 
 def _parse_data_url(url: str) -> tuple[str, bytes] | None:

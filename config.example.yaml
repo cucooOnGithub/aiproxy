@@ -28,6 +28,8 @@ llm:
   warm_timeout: 300    # seconds allowed for the startup pre-warm cold load
   # keep_alive: 0      # unload model after each call; needed for an ensemble
                        # on a VRAM-tight GPU (else models thrash / OOM)
+  cache_ttl: 3600      # seconds to keep in-memory NER results (null = forever);
+                       # a reloaded model never re-runs NER on cached text
 
 # Load the local model at startup so the first request doesn't hit the
 # cold-load cost against `llm.timeout`. Set false to skip.

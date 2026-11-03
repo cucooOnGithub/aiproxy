@@ -17,6 +17,7 @@ class PartKind(str, Enum):
     TEXT = "text"
     IMAGE = "image"
     PDF = "pdf"
+    OFFICE = "office"  # OOXML: .docx/.pptx/.xlsx (zip with embedded media)
 
 
 @dataclass
@@ -48,4 +49,5 @@ class Document:
         return [p for p in self.parts if p.kind is PartKind.TEXT]
 
     def media_parts(self) -> list[Part]:
-        return [p for p in self.parts if p.kind in (PartKind.IMAGE, PartKind.PDF)]
+        return [p for p in self.parts
+                if p.kind in (PartKind.IMAGE, PartKind.PDF, PartKind.OFFICE)]

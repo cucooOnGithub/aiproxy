@@ -24,7 +24,7 @@ from aiproxy.pipeline.base import Processor, SessionContext
 
 class ImageRedactor(Processor):
     name = "image_redactor"
-    handles = frozenset({PartKind.IMAGE, PartKind.PDF})
+    handles = frozenset({PartKind.IMAGE, PartKind.PDF, PartKind.OFFICE})
 
     def __init__(self, config: dict):
         super().__init__(config)
@@ -39,6 +39,8 @@ class ImageRedactor(Processor):
                 part.data = self._redact_image(part.data, part.media_type)
             elif part.kind is PartKind.PDF:
                 part.data = self._redact_pdf(part.data)
+            elif part.kind is PartKind.OFFICE:
+                part.data = self._redact_office(part.data)
         return doc
 
     def process_response(self, doc: Document, ctx: SessionContext) -> Document:
@@ -108,6 +110,9 @@ class ImageRedactor(Processor):
                     for rect in page.search_for(term):
                         page.add_redact_annot(rect, fill=(0, 0, 0))
                 page.apply_redactions()
+                # Also inspect images embedded in this text page (a text PDF
+                # can still carry pictures that hold names/faces).
+                self._redact_pdf_page_images(src, page)
                 out.insert_pdf(src, from_page=page.number, to_page=page.number)
             else:
                 # Scanned/image-only page: rasterize, run the image path
@@ -121,3 +126,50 @@ class ImageRedactor(Processor):
         out.close()
         src.close()
         return buf.getvalue()
+
+    def _redact_pdf_page_images(self, doc, page) -> None:
+        """Mask sensitive content inside raster images embedded on a page."""
+        import logging
+
+        for img in page.get_images(full=True):
+            xref = img[0]
+            try:
+                info = doc.extract_image(xref)
+                masked = self._redact_image(info["image"], "image/png")
+                page.replace_image(xref, stream=masked)
+            except Exception as e:  # noqa: BLE001
+                logging.getLogger("aiproxy").warning(
+                    "pdf embedded image xref=%s skipped: %s", xref, e)
+
+    # --- office (OOXML: docx/pptx/xlsx) path ---------------------------
+    def _redact_office(self, data: bytes) -> bytes:
+        """Inspect images embedded in an OOXML office document.
+
+        .docx/.pptx/.xlsx are zip archives; pictures live under word/media/,
+        ppt/media/, xl/media/ (and other */media/). Each raster image is run
+        through the image path (OCR -> NER -> mask) and written back; every
+        other archive entry is copied verbatim. Document body TEXT is NOT
+        redacted here (that needs format-aware XML editing) - only images.
+        """
+        import io as _io
+        import logging
+        import zipfile
+
+        exts = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff"}
+        src = zipfile.ZipFile(_io.BytesIO(data), "r")
+        out_buf = _io.BytesIO()
+        out = zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED)
+        for item in src.infolist():
+            blob = src.read(item.filename)
+            lower = item.filename.lower()
+            if "/media/" in lower and any(lower.endswith(e) for e in exts):
+                try:
+                    blob = self._redact_image(blob, "image/png")
+                    # masked output is PNG; keep the original path/name
+                except Exception as e:  # noqa: BLE001
+                    logging.getLogger("aiproxy").warning(
+                        "office image %s skipped: %s", item.filename, e)
+            out.writestr(item, blob)
+        out.close()
+        src.close()
+        return out_buf.getvalue()

@@ -186,10 +186,24 @@ Add its name to `pipeline:` in config. For reversible redaction, use
 
 - Images: OCR → NER → opaque black boxes over flagged words → re-encoded
   PNG sent upstream.
-- Text-layer PDFs: true redaction (PyMuPDF removes the underlying text).
+- Text-layer PDFs: true redaction (PyMuPDF removes the underlying text) AND
+  every raster image embedded in the page is inspected and masked.
 - Scanned PDFs: rasterized, then treated as images.
+- Office docs (OOXML `.docx`/`.pptx`/`.xlsx`, incl. SharePoint exports):
+  the archive is unzipped, every image under `*/media/` is inspected and
+  masked, the rest is repacked verbatim. **Document body text is not
+  redacted inside Office files yet** — only their images. Convert to PDF
+  first if you need the text scrubbed too.
 - `image_redactor.max_pages` caps work per PDF.
 - One-way: nothing about a masked region is restorable.
+
+### Caching
+- **NER result cache** (in-memory, per model+text): a reloaded model never
+  re-runs NER on text it already saw. Bounded by `llm.cache_ttl` seconds.
+- **Per-document redaction cache** (persistent, in the store, per session):
+  the exact redacted output of a text is stored by hash, so a re-presented
+  document (e.g. the same conversation history resent each turn) skips NER
+  and replacement entirely. Cleared by `purge`.
 
 ---
 

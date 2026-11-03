@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -48,7 +49,8 @@ class Entity:
 
 class OllamaNER:
     def __init__(self, url: str, model: str, timeout: float = 60.0,
-                 warm_timeout: float = 300.0, keep_alive=None):
+                 warm_timeout: float = 300.0, keep_alive=None,
+                 cache_ttl: float | None = 3600.0):
         self.url = url.rstrip("/")
         self.model = model
         self.timeout = timeout          # per-detect() request budget
@@ -57,7 +59,11 @@ class OllamaNER:
         # Set 0 (or "0s") so an ensemble unloads each model before loading
         # the next on a VRAM-tight GPU. None = Ollama default (5m).
         self.keep_alive = keep_alive
-        self._cache: dict[str, list[Entity]] = {}
+        # In-memory NER result cache. Survives Ollama unloading the model
+        # (keep_alive:0), so a reloaded model never re-runs NER on text it
+        # already saw. cache_ttl bounds entry age in seconds; None = forever.
+        self.cache_ttl = cache_ttl
+        self._cache: dict[str, tuple[float, list[Entity]]] = {}
 
     def _ka(self, body: dict) -> dict:
         if self.keep_alive is not None:
@@ -79,8 +85,12 @@ class OllamaNER:
         if not text.strip():
             return []
         key = hashlib.sha256(f"{self.model}:{text}".encode()).hexdigest()
-        if key in self._cache:
-            return self._cache[key]
+        hit = self._cache.get(key)
+        if hit is not None:
+            ts, ents = hit
+            if self.cache_ttl is None or (time.monotonic() - ts) < self.cache_ttl:
+                return ents
+            del self._cache[key]  # expired
 
         resp = httpx.post(
             f"{self.url}/api/chat",
@@ -103,7 +113,7 @@ class OllamaNER:
             # Fail-closed callers treat an empty list differently; here we
             # surface nothing found and let the pipeline's mode decide.
             ents = []
-        self._cache[key] = ents
+        self._cache[key] = (time.monotonic(), ents)
         return ents
 
 
@@ -153,10 +163,12 @@ def build_ner(llm: dict) -> "OllamaNER | MultiNER":
     timeout = llm.get("timeout", 60.0)
     warm_timeout = llm.get("warm_timeout", 300.0)
     keep_alive = llm.get("keep_alive")
+    cache_ttl = llm.get("cache_ttl", 3600.0)
 
     def _one(model: str) -> OllamaNER:
         return OllamaNER(url=url, model=model, timeout=timeout,
-                         warm_timeout=warm_timeout, keep_alive=keep_alive)
+                         warm_timeout=warm_timeout, keep_alive=keep_alive,
+                         cache_ttl=cache_ttl)
 
     models = llm.get("models")
     if models:

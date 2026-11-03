@@ -8,6 +8,7 @@ without this store, so losing it = permanent anonymization.
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 import threading
 from pathlib import Path
@@ -25,6 +26,21 @@ CREATE TABLE IF NOT EXISTS mappings (
 );
 CREATE INDEX IF NOT EXISTS idx_sess_orig
     ON mappings (session_id, entity_type);
+
+-- Per-text redaction cache: hash of a processor's INPUT text -> its already
+-- redacted OUTPUT, so a re-presented document (e.g. the same conversation
+-- history resent each turn) is not re-analyzed. The token<->original
+-- mappings produced the first time stay in `mappings`, so restoration of a
+-- cached-hit output still works. `redacted` is encrypted at rest like
+-- originals, since it embeds the source structure.
+CREATE TABLE IF NOT EXISTS redaction_cache (
+    session_id  TEXT NOT NULL,
+    stage       TEXT NOT NULL,   -- which processor produced it
+    text_hash   TEXT NOT NULL,   -- sha256 of the input text
+    redacted    BLOB NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (session_id, stage, text_hash)
+);
 """
 
 
@@ -79,5 +95,33 @@ class SqliteStore:
             cur = self._conn.execute(
                 "DELETE FROM mappings WHERE session_id=?", (session_id,)
             )
+            self._conn.execute(
+                "DELETE FROM redaction_cache WHERE session_id=?", (session_id,)
+            )
             self._conn.commit()
             return cur.rowcount
+
+    # --- per-text redaction cache --------------------------------------
+    @staticmethod
+    def text_hash(text: str) -> str:
+        return hashlib.sha256(text.encode()).hexdigest()
+
+    def cache_get(self, session_id: str, stage: str, text_hash: str) -> str | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT redacted FROM redaction_cache "
+                "WHERE session_id=? AND stage=? AND text_hash=?",
+                (session_id, stage, text_hash),
+            ).fetchone()
+        return self.cipher.decrypt(row[0]).decode() if row else None
+
+    def cache_put(self, session_id: str, stage: str, text_hash: str,
+                  redacted: str) -> None:
+        enc = self.cipher.encrypt(redacted.encode())
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO redaction_cache "
+                "(session_id, stage, text_hash, redacted) VALUES (?,?,?,?)",
+                (session_id, stage, text_hash, enc),
+            )
+            self._conn.commit()

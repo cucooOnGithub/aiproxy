@@ -50,6 +50,17 @@ class Anonymizer(Processor):
     def process_request(self, doc: Document, ctx: SessionContext) -> Document:
         for part in doc.text_parts():
             text = part.text or ""
+
+            # Document-level cache: if this exact input text was redacted
+            # before in this session, reuse the stored output and skip NER
+            # entirely. The token<->original mappings from that first pass
+            # are still in the store, so the response path restores normally.
+            h = ctx.store.text_hash(text)
+            cached = ctx.store.cache_get(ctx.session_id, self.name, h)
+            if cached is not None:
+                part.text = cached
+                continue
+
             try:
                 ents: list[Entity] = self.ner.detect(text)
             except Exception as e:  # noqa: BLE001
@@ -78,6 +89,7 @@ class Anonymizer(Processor):
                 replacement = "[REDACTED]" if action == "redact" else token
                 text = text.replace(ent.text, replacement)
             part.text = text
+            ctx.store.cache_put(ctx.session_id, self.name, h, text)
         return doc
 
     def process_response(self, doc: Document, ctx: SessionContext) -> Document:
