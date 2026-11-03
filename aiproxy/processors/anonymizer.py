@@ -141,6 +141,18 @@ class Anonymizer(Processor):
         import re as _re
         import zipfile
 
+        # Disk cache: same original Office doc in the same session -> reuse the
+        # already text-redacted bytes and skip the local LLM entirely. Scoped
+        # by session so the cached tokens resolve against this session's
+        # mappings (which the first pass stored).
+        arch = getattr(ctx, "archive", None)
+        akey = arch.key(f"office-text:{ctx.session_id}", data) if arch else None
+        if arch:
+            cached = arch.get(akey)
+            if cached is not None:
+                METRICS.inc("document_cache_hits")
+                return cached
+
         # <w:t ...>text</w:t>, <a:t>text</a:t>, <t ...>text</t> (not <w:tbl> etc)
         pat = _re.compile(r"<(w:t|a:t|t)(?=[ >/])([^>]*)>(.*?)</\1>", _re.DOTALL)
 
@@ -183,7 +195,10 @@ class Anonymizer(Processor):
                 out.writestr(info, src.read(info.filename))
         out.close()
         src.close()
-        return out_buf.getvalue()
+        result = out_buf.getvalue()
+        if arch:
+            arch.put(akey, result)
+        return result
 
     def process_response(self, doc: Document, ctx: SessionContext) -> Document:
         for part in doc.text_parts():

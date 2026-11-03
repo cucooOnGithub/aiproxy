@@ -37,6 +37,7 @@ class Metrics:
             "entities_by_type": _prefix(c, "entity:"),
             "tokens_created": c.get("tokens_created", 0),
             "cache_hits": c.get("cache_hits", 0),
+            "document_cache_hits": c.get("document_cache_hits", 0),
             "ner_blocks": c.get("ner_blocks", 0),
         }
         return out

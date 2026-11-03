@@ -20,10 +20,11 @@ class SessionContext:
     Processors must scope all stored mappings by `session_id`.
     """
 
-    def __init__(self, session_id: str, store, config: dict):
+    def __init__(self, session_id: str, store, config: dict, archive=None):
         self.session_id = session_id
         self.store = store
         self.config = config
+        self.archive = archive  # DocArchive or None (disk doc cache/archive)
 
 
 class Processor(ABC):

@@ -75,3 +75,10 @@ store:
   backend: sqlite
   path: ./map.db
   encrypt: true     # requires env AIPROXY_STORE_KEY (python -m aiproxy genkey)
+
+# Optional on-disk archive of REDACTED documents, keyed by a hash of the
+# original. Doubles as a cache: re-presenting the same document reads the
+# redacted version from here instead of re-running the local LLM / OCR.
+# Only redacted output is written (never the original PII). Omit to disable.
+# archive:
+#   dir: ./redacted_archive

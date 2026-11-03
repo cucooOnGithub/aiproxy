@@ -21,6 +21,7 @@ import httpx
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
+from aiproxy.archive import build_archive
 from aiproxy.metrics import METRICS
 from aiproxy.pipeline.base import SessionContext
 from aiproxy.pipeline.registry import build_pipeline
@@ -76,6 +77,7 @@ async def _prewarm(pipeline, cfg: dict) -> None:
 
 def create_app(cfg: dict) -> FastAPI:
     store = _build_store(cfg)
+    archive = build_archive(cfg)
     pipeline = build_pipeline(cfg["pipeline"], cfg)
     upstreams = cfg["upstreams"]
 
@@ -102,7 +104,7 @@ def create_app(cfg: dict) -> FastAPI:
         """
         body = await req.json()
         adapter = ADAPTERS[provider]
-        ctx = SessionContext(_session_id(req, body), store, cfg)
+        ctx = SessionContext(_session_id(req, body), store, cfg, archive)
         doc = pipeline.run_request(adapter.to_document(body), ctx)
         return JSONResponse(adapter.from_document(doc))
 
@@ -124,7 +126,7 @@ def create_app(cfg: dict) -> FastAPI:
     async def _handle(req: Request, provider: str, path: str) -> Response:
         body = await req.json()
         adapter = ADAPTERS[provider]
-        ctx = SessionContext(_session_id(req, body), store, cfg)
+        ctx = SessionContext(_session_id(req, body), store, cfg, archive)
         METRICS.inc("requests")
         METRICS.inc(f"req:{provider}")
 
@@ -210,7 +212,8 @@ async function tick(){
     card(m.text_parts_redacted,'text parts redacted')+
     card(m.tokens_created,'tokens created')+
     card((m.store&&m.store.total_mappings)||0,'stored mappings')+
-    card(m.cache_hits,'cache hits')+
+    card(m.cache_hits,'text cache hits')+
+    card(m.document_cache_hits,'document cache hits')+
     card(m.ner_blocks,'NER blocks')+
     card((m.store&&m.store.sessions)||0,'sessions')+
     card(fmtUptime(m.uptime_seconds),'uptime');

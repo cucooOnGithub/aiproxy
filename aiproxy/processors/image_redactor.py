@@ -35,7 +35,21 @@ class ImageRedactor(Processor):
         self.dpi = config.get("dpi", 200)  # raster resolution for scanned pages
 
     def process_request(self, doc: Document, ctx: SessionContext) -> Document:
+        arch = getattr(ctx, "archive", None)
         for part in doc.media_parts():
+            if part.data is None:
+                continue
+            # Disk cache: identical input document -> reuse the redacted file,
+            # skip OCR/NER entirely. Media redaction here is one-way, so a
+            # content-only scope lets any session reuse it.
+            key = arch.key("media", part.data) if arch else None
+            if arch:
+                cached = arch.get(key)
+                if cached is not None:
+                    part.data = cached
+                    METRICS.inc("document_cache_hits")
+                    continue
+
             if part.kind is PartKind.IMAGE:
                 part.data = self._redact_image(part.data, part.media_type)
                 METRICS.inc("doc:image")
@@ -44,6 +58,9 @@ class ImageRedactor(Processor):
                 METRICS.inc("doc:pdf")
             elif part.kind is PartKind.OFFICE:
                 part.data = self._redact_office(part.data)
+
+            if arch:
+                arch.put(key, part.data)
         return doc
 
     def process_response(self, doc: Document, ctx: SessionContext) -> Document:

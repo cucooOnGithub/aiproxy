@@ -112,10 +112,21 @@ text parts redacted, tokens created, entities by type, documents by kind
 totals. Raw JSON at `/metrics`. Counts are non-sensitive (how many, never
 the values). Runtime counters reset on restart; store totals persist.
 
-> Redacted documents are **not** written to disk — they are forwarded
-> upstream and discarded. Only token↔original mappings and the redaction
-> cache persist, inside the `store.path` SQLite file. There is no document
-> archive directory.
+> By default redacted documents are **not** written to disk — they are
+> forwarded upstream and discarded; only token↔original mappings and the
+> text redaction cache persist in the `store.path` SQLite file. Set
+> `archive.dir` to also keep redacted documents on disk (see below).
+
+### Document archive + disk cache (`archive.dir`)
+Set `archive.dir` to a directory and each redacted document (image / PDF /
+Office) is written there, named by a hash of its **original**. That store
+doubles as a cache: presenting the same original again reads the redacted
+version from disk and **skips the local LLM / OCR** entirely
+(`document_cache_hits` on the dashboard). Only redacted output is written —
+never the original PII-bearing bytes. Image/PDF entries are content-scoped
+(reused across sessions); Office entries are session-scoped (their tokens
+must resolve against that session's mappings). Omit `archive.dir` to
+disable. Delete the directory to clear the cache.
 
 ### Point your tool at it
 
