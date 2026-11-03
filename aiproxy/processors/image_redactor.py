@@ -60,7 +60,8 @@ class ImageRedactor(Processor):
                 part.data = self._redact_office(part.data)
 
             if arch:
-                arch.put(key, part.data)
+                arch.put(key, part.data, part.origin.get("filename"),
+                         part.origin.get("ext", ""))
         return doc
 
     def process_response(self, doc: Document, ctx: SessionContext) -> Document:

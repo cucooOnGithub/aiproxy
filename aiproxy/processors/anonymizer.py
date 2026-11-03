@@ -114,7 +114,7 @@ class Anonymizer(Processor):
         for part in doc.parts:
             if part.kind is PartKind.OFFICE and part.data:
                 try:
-                    part.data = self._redact_office(part.data, ctx)
+                    part.data = self._redact_office(part.data, ctx, part)
                     METRICS.inc("doc:office")
                 except AnonymizerError:
                     raise
@@ -124,7 +124,8 @@ class Anonymizer(Processor):
                             f"office redaction failed, blocking send: {e}") from e
         return doc
 
-    def _redact_office(self, data: bytes, ctx: SessionContext) -> bytes:
+    def _redact_office(self, data: bytes, ctx: SessionContext,
+                       part=None) -> bytes:
         """Tokenize body text inside an OOXML doc (docx/pptx/xlsx), reversibly.
 
         Text lives in `<w:t>` / `<a:t>` / `<t>` elements. We edit those text
@@ -197,7 +198,9 @@ class Anonymizer(Processor):
         src.close()
         result = out_buf.getvalue()
         if arch:
-            arch.put(akey, result)
+            origin = getattr(part, "origin", {}) or {}
+            arch.put(akey, result, origin.get("filename"),
+                     origin.get("ext", ""))
         return result
 
     def process_response(self, doc: Document, ctx: SessionContext) -> Document:

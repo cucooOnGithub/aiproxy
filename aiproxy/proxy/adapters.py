@@ -71,16 +71,20 @@ class AnthropicAdapter(Adapter):
         if btype == "image":
             src = block.get("source", {})
             data = base64.b64decode(src.get("data", "")) if src.get("data") else None
-            return Part(PartKind.IMAGE, data=data,
-                        media_type=src.get("media_type"),
-                        origin={"path": path, "role": role})
+            mt = src.get("media_type")
+            return Part(PartKind.IMAGE, data=data, media_type=mt,
+                        origin={"path": path, "role": role,
+                                "filename": _doc_name(block),
+                                "ext": _ext_for(mt)})
         if btype == "document":  # PDF or OOXML office doc
             src = block.get("source", {})
             data = base64.b64decode(src.get("data", "")) if src.get("data") else None
             mt = src.get("media_type") or ""
             kind = PartKind.OFFICE if _is_office(mt) else PartKind.PDF
             return Part(kind, data=data, media_type=mt,
-                        origin={"path": path, "role": role})
+                        origin={"path": path, "role": role,
+                                "filename": _doc_name(block),
+                                "ext": _ext_for(mt)})
         # Unknown block: keep as inert text so it round-trips untouched.
         return Part(PartKind.TEXT, text="",
                     origin={"path": path, "role": role, "inert": True})
@@ -134,9 +138,36 @@ _OFFICE_TYPES = frozenset({
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 })
 
+# media type -> file extension, for naming archived redacted output when the
+# original carried no filename.
+_EXT_BY_TYPE = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/pdf": ".pdf",
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "image/bmp": ".bmp",
+    "image/tiff": ".tif",
+}
+
 
 def _is_office(media_type: str) -> bool:
     return media_type in _OFFICE_TYPES
+
+
+def _ext_for(media_type: str | None) -> str:
+    return _EXT_BY_TYPE.get(media_type or "", "")
+
+
+def _doc_name(block: dict) -> str | None:
+    """Best-effort original filename for a document/image block (clients vary;
+    the Anthropic API exposes `title`)."""
+    src = block.get("source", {}) if isinstance(block.get("source"), dict) else {}
+    return (block.get("title") or block.get("filename")
+            or src.get("filename") or src.get("title"))
 
 
 def _parse_data_url(url: str) -> tuple[str, bytes] | None:
@@ -189,7 +220,8 @@ class OpenAIAdapter(Adapter):
             if parsed:
                 media_type, data = parsed
                 return Part(PartKind.IMAGE, data=data, media_type=media_type,
-                            origin={"path": path, "role": role})
+                            origin={"path": path, "role": role,
+                                    "ext": _ext_for(media_type)})
             # Remote URL: cannot redact; leave untouched.
             return Part(PartKind.TEXT, text="",
                         origin={"path": path, "role": role, "inert": True})
