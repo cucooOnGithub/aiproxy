@@ -36,7 +36,7 @@ Then verify and run:
 ```bash
 python -m aiproxy doctor --config config.yaml   # check everything is set up
 python -m aiproxy serve  --config config.yaml
-export ANTHROPIC_BASE_URL=http://127.0.0.1:8088  # match listen.port
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8080  # match listen.port
 ```
 
 ### Build a standalone binary (optional)
@@ -61,7 +61,7 @@ python -m aiproxy serve --config config.yaml
 ```
 
 ## Status
-Working, 45 passing tests. Not yet smoke-tested against live providers
+Working, 48 passing tests. Not yet smoke-tested against live providers
 except the local echo round-trip below.
 
 - **Providers**: Anthropic (`/v1/messages`) and OpenAI
@@ -72,7 +72,13 @@ except the local echo round-trip below.
 - **Anonymizer**: local-LLM NER via Ollama, reversible tokens, encrypted
   SQLite store. Configurable model, prompt, and entity types. Ensemble
   (`MultiNER`, union of several models) or a single model; `keep_alive`,
-  cache TTL, and startup pre-warm for VRAM-tight boxes.
+  cache TTL, and startup pre-warm for VRAM-tight boxes. Deterministic
+  backstops: `allowlist`/`denylist` and a name gazetteer
+  (`anonymizer.name_gazetteer`) that joins adjacent known name-parts the
+  small model misses.
+- **Archive/cache**: optional `archive.dir` keeps redacted documents on disk
+  (named by a hash of the original, deduped) and doubles as a document cache
+  that skips re-running the LLM/OCR on a re-presented file.
 - **Documents**: images (OCR→mask), PDFs (true text redaction + embedded
   images + scanned-page rasterize), and OOXML Office `.docx`/`.pptx`/`.xlsx`
   (body text tokenized reversibly + `*/media/` images masked).
