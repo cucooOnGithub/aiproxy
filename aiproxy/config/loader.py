@@ -47,4 +47,7 @@ def load_config(path: str) -> dict:
             cfg.setdefault(p, {}).setdefault("llm", shared_llm)
     # Propagate global mode into anonymizer unless overridden.
     cfg.setdefault("anonymizer", {}).setdefault("mode", cfg["mode"])
+    # Fail closed on invalid config: refuse to start/reload (Phase 0).
+    from aiproxy.config.schema import validate_config
+    validate_config(cfg)
     return cfg

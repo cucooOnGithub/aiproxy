@@ -13,6 +13,9 @@ import sys
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="aiproxy")
+    from aiproxy import __version__
+    ap.add_argument("--version", action="version",
+                    version=f"aiproxy {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("serve", help="run the proxy")
@@ -66,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_config(args.config)
         from aiproxy.proxy.server import create_app
 
-        app = create_app(cfg)
+        app = create_app(cfg, config_path=args.config)
         listen = cfg["listen"]
         uvicorn.run(app, host=listen["host"], port=listen["port"])
         return 0

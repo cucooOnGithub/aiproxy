@@ -6,6 +6,9 @@ aiproxy scrubs sensitive content locally, forwards the redacted request
 upstream, and restores the originals in the reply — so the provider never
 sees the real values but you still read them.
 
+> Free and self-hosted. If it's useful to you, consider
+> [buying me a coffee ☕](https://buymeacoffee.com/cucoo) — see [§11](#11-support-this-project-).
+
 ---
 
 ## 1. What it does and does not do
@@ -34,12 +37,110 @@ aiproxy protects against the *upstream provider* (and anyone reading
 upstream logs) seeing your sensitive data. It does **not** protect against
 an attacker who already has your local machine or the mapping store.
 
+### Use at your own risk — no warranty
+aiproxy is provided **as is**, without warranty or condition of any kind, and
+the authors accept **no liability** for any damages arising from its use — see
+the **No Liability** clause in [`LICENSE`](../LICENSE). In plain terms:
+
+- **Detection is not guaranteed.** The local LLM can miss an entity, so a real
+  value can still reach the upstream provider. aiproxy reduces risk; it does not
+  eliminate it. Run `fail_closed`, verify with `/dryrun`, and use the
+  deterministic backstops (allow/deny lists, `always_tokenize`, the gazetteer).
+- **You remain responsible** for validating that redaction is adequate for your
+  data, and for any legal/compliance obligations (e.g. GDPR) you have toward the
+  people whose data you process. The license governs only your relationship with
+  the authors, not your obligations to third parties.
+- **The mapping store is the de-anonymization key.** Losing control of it (and
+  its encryption key) reverses every redaction. Guard both.
+
 ---
 
-## 2. Install
+## 1b. Architecture
 
-Requires Python ≥ 3.11. The installer handles everything else (Ollama,
-Tesseract, models, key, config).
+### Request / response flow (one replica)
+The pipeline redacts on the way out and restores on the way in. The upstream
+API only ever sees tokens; real values never cross the trust boundary. Both
+directions share the encrypted store and the local NER model.
+
+```mermaid
+flowchart LR
+  C["AI client<br/>(Claude Code / SDK)"] --> I["Ingress · identity<br/>resolve user_id<br/>session = user/raw"]
+  I --> P
+  subgraph P["Pipeline"]
+    direction TB
+    L["logger"] --> S["secrets_regex"] --> A["anonymizer · NER → ⟦TOKEN⟧"] --> IR["image_redactor"]
+  end
+  P -- "redacted + tokens" --> U["Upstream LLM<br/>Anthropic / OpenAI<br/>(sees tokens only)"]
+  U -- "tokens" --> P
+  P -- "originals restored" --> C
+  A <-- "detect" --> N["Local NER<br/>Ollama + gazetteer<br/>+ known-value sweep"]
+  P <-- "put / token_for · cache · terms" --> ST[("Store · encrypted<br/>sqlite | postgres<br/>mappings · seq · cache · user_terms")]
+  K["Key source<br/>env | file | command"] -. "at-rest key" .-> ST
+```
+
+Identity resolution namespaces the session as `user_id/raw` so one user can
+never reverse another's tokens. The anonymizer tokenizes reversibly; only
+`denylist` hits are one-way `[REDACTED]`. The response path runs the same
+processors in reverse.
+
+### Organization deployment (scale-out)
+Central config owned by IT/security; users self-serve terms, never config or
+code. Frontends are stateless behind a load balancer once state lives in a
+shared Postgres store and a warm shared NER service.
+
+```mermaid
+flowchart LR
+  Users["Users · AI tools"] --> GW["SSO / OIDC gateway<br/>injects signed x-auth-user"]
+  GW --> LB["Load balancer<br/>probe /readyz"]
+  LB --> F1 & F2 & F3
+  subgraph Frontends["Stateless aiproxy frontends · N replicas"]
+    F1["frontend"]
+    F2["frontend"]
+    F3["frontend"]
+  end
+  Frontends <-- "shared state" --> PG[("Postgres store<br/>encrypted · shared<br/>mappings · user_terms")]
+  Frontends <-- "NER" --> NER["NER service<br/>warm GPU · shared"]
+  SM["Secrets mgr / KMS"] -. "at-rest key" .-> PG
+  CFG["Central config · IT/security<br/>org terms · pipeline · plugins<br/>validated · SIGHUP hot-reload"] -. "SIGHUP" .-> Frontends
+  Users -. "/terms self-service (additive)" .-> Frontends
+```
+
+The critical path to multi-user is a shared store (Phase 1) + per-user
+identity (Phase 2) + the per-user term tier (Phase 3). Full design and
+sequencing: [`ORG_DEPLOYMENT.md`](ORG_DEPLOYMENT.md).
+
+---
+
+## 2. Install — single workstation
+
+One person, one machine: local SQLite store and a local NER model. For a
+shared multi-user service see [§2b](#2b-install--organization).
+
+### Requirements
+
+| | Minimum | Comfortable |
+|---|---|---|
+| OS | macOS, Linux, or Windows 10+ | same |
+| Python | 3.11+ | 3.11+ |
+| RAM free | 6 GB (CPU-only NER) | 8 GB or more |
+| GPU | none — the 3B model runs on CPU | any GPU with ≥ 4 GB VRAM (much faster NER and startup pre-warm) |
+| Disk | ~4 GB (Python deps + the 3B NER model; +50–60 MB if you build the binary) | SSD |
+| Extra software | Ollama (local LLM runtime, `:11434`) and the Tesseract OCR binary — both installed for you by `install.sh` | |
+
+The default NER model is `qwen2.5:3b-instruct` (~2 GB download). Text
+anonymization needs only Ollama; the image/PDF/Office path also needs
+Tesseract. OCR runs on CPU. Latency is dominated by local NER + OCR compute,
+so a GPU is the single biggest speed-up on a workstation.
+
+The installer handles everything beyond Python (Ollama, Tesseract, models,
+key, config).
+
+### Get the code
+Clone the repository (needs `git`); everything else is set up below.
+```bash
+git clone https://github.com/cucooOnGithub/aiproxy.git aiproxy
+cd aiproxy
+```
 
 ### Automatic (recommended)
 From the repo root:
@@ -115,6 +216,68 @@ Important:
 - The binary bundles Python, all pip dependencies, and pypdfium2's native
   PDFium library (~50–60 MB). It does not auto-start on boot and does not
   create `config.yaml` — ship a config beside it or pass `--config`.
+
+---
+
+## 2b. Install — organization
+
+A shared service for many users: central config owned by IT/security,
+per-user identity and isolation, and horizontal scale. The full design,
+phase-by-phase rollout and every config key are in
+[`ORG_DEPLOYMENT.md`](ORG_DEPLOYMENT.md); this section covers what differs from
+the workstation install. The topology diagram is in [§1b](#1b-architecture).
+
+### Requirements
+
+| | Notes |
+|---|---|
+| Proxy frontends | Stateless once state is external (store + NER). Each is cheap (CPU, ~1 GB RAM); run N behind a load balancer and scale horizontally. |
+| Store | SQLite is single-writer/local — fine for one box, a bottleneck for many. Use `store.backend: postgres` with a managed Postgres for multiple frontends. |
+| NER host | **One** host with a GPU, running the model warm and shared (see below). Sized for the model you choose, not per frontend. |
+| Secrets | A secrets manager / KMS for the at-rest key (`store.key_source: command`); see [`KEY_MANAGEMENT.md`](KEY_MANAGEMENT.md). |
+| Auth | An SSO/OIDC gateway in front injecting a signed identity header (`identity.source: header`), or per-user API keys (`identity.source: api_key`). |
+
+### What changes vs. a workstation
+- `store.backend: postgres` + `store.dsn` so frontends share one mapping store.
+- `identity:` to resolve a `user_id` per request (sessions are namespaced so no
+  user can reverse another's tokens).
+- Users self-serve their own term lists at `/terms`; org terms stay in central
+  config. Edit central config and `kill -HUP <pid>` to hot-reload — no restart.
+- Point frontends at the shared NER host with `llm.url`.
+- Load-balancer health probe: `/readyz` (503 until the store is reachable).
+
+### Improving the local LLM at org scale
+On a workstation the NER model is deliberately small (`qwen2.5:3b-instruct`) so
+it cold-loads fast enough per request. A shared deployment removes that
+constraint — the model is loaded **once** on a warm GPU host and reused by every
+frontend — so you can run a much more accurate model. Recall (catching every
+entity) is the whole game here, and a bigger model is the largest single lever.
+
+- **Promote NER to a dedicated, warm, shared service.** Run Ollama on one GPU
+  host; set every frontend's `llm.url` to it. The model stays resident, so the
+  per-request cold-load cost that caps a workstation disappears.
+- **Use a larger model, or an ensemble.** A 7–8B model catches names and orgs
+  the 3B misses. An ensemble takes the *union* of several models' detections for
+  still-higher recall:
+  ```yaml
+  llm:
+    models: [qwen2.5:7b-instruct, llama3.1:8b]   # union of detections
+    keep_alive: -1          # keep models resident (never unload)
+  ```
+  Latency is the **sum** of the models, so an ensemble is only practical when
+  warm and shared, never per-request on a cold box. Budget ~8–16 GB VRAM for a
+  single 7–8B model and more for an ensemble; size the GPU host accordingly.
+- **Keep models resident** with `llm.keep_alive` (seconds, or `-1` for forever)
+  so no request pays a load.
+- **Tune for your data.** Expand `llm.entity_types` with types that matter to
+  you, adjust the NER `llm.prompt`, and — the highest-leverage deterministic
+  backstop — grow `anonymizer.name_gazetteer` from your directory (HR / Active
+  Directory export) so known employee and client names are caught even when the
+  model misses them. The known-value sweep then propagates any single catch
+  across the rest of the session.
+- **Queue + health.** Put a request queue in front of the shared NER service and
+  gate frontends on `/readyz` so a replica whose NER is cold or down is pulled
+  from rotation rather than failing sends.
 
 ---
 
@@ -202,7 +365,9 @@ python -m aiproxy serve --config config.yaml
 # listening on http://127.0.0.1:8088   (per listen.port)
 ```
 
-Health check: `curl http://127.0.0.1:8080/healthz`
+Health check: `curl http://127.0.0.1:8080/healthz` (liveness).
+Readiness: `curl http://127.0.0.1:8080/readyz` — 200 when the store is
+reachable, 503 otherwise (use it as the load-balancer probe).
 
 ### Dashboard
 `http://127.0.0.1:8080/dashboard` — live counts (auto-refresh): requests,
@@ -271,6 +436,47 @@ python -m aiproxy purge --config config.yaml --session <session-id>
 Back up `map.db` **and** `AIPROXY_STORE_KEY` together, or treat both as
 ephemeral — one without the other is useless.
 
+### Store backend
+`store.backend` is `sqlite` (default, single-box) or `postgres` (shared,
+multi-writer — for several proxy replicas behind a load balancer). Postgres
+needs `store.dsn` and the `psycopg` package (`pip install 'psycopg[binary]'`).
+Both backends encrypt originals at rest with the same key.
+
+### Where the at-rest key comes from
+`store.key_source` is `env` (default — `AIPROXY_STORE_KEY`), `file`
+(`key_path`, a mounted secret) or `command` (`key_command`, shell out to a
+secrets manager / KMS CLI; its stdout is the key). This keeps no long-lived
+secret in the config file. Key rotation and per-tenant keys:
+[`docs/KEY_MANAGEMENT.md`](KEY_MANAGEMENT.md).
+
+---
+
+## 5b. Multi-user / organization deployment
+
+For a shared proxy owned by IT/security with many users, aiproxy adds identity,
+per-user term self-service, hot-reload and scale-out. Full design and rollout
+sequencing: [`docs/ORG_DEPLOYMENT.md`](ORG_DEPLOYMENT.md). The moving parts:
+
+- **Identity** (`identity.source`): `anonymous` (default, single namespace),
+  `api_key` (map an inbound key → `user_id` via `identity.keys`), or `header`
+  (trust a signed identity header from an SSO/OIDC gateway in front). Mappings
+  are isolated per user — one user can never reverse another's tokens.
+- **Per-user terms** (Phase 3): each user manages their **own**
+  `always_tokenize`/`denylist` strings at `GET/POST/DELETE /api/terms` or the
+  `http://127.0.0.1:8080/terms` page. They are additive and merge on top of the
+  org lists in config; a user can never weaken org coverage. Added terms take
+  effect within `anonymizer.user_terms_ttl` seconds, no restart.
+- **Hot-reload**: edit central config and send `SIGHUP`
+  (`kill -HUP <pid>`) — the pipeline and upstreams swap in place without
+  dropping the store. Invalid config is rejected and the running config kept
+  (fail closed).
+- **Scale-out**: `store.backend: postgres` lets N stateless frontends share one
+  store; `/readyz` (503 until the store is reachable) is the load-balancer
+  probe. Per-user request counts appear in `/metrics`.
+- **Hardening**: keep `mode: observe`, `redaction_log.debug` and `log_all` off
+  in production — they leak real data upstream / to disk and now log a loud
+  warning at startup when set.
+
 ---
 
 ## 6. Writing a custom processor
@@ -297,13 +503,26 @@ class MyFilter(Processor):
 Register it in `aiproxy/pipeline/registry.py`:
 ```python
 from aiproxy.processors.my_filter import MyFilter
-REGISTRY[MyFilter.name] = MyFilter
+BUILTINS[MyFilter.name] = MyFilter
 ```
 
 Add its name to `pipeline:` in config. For reversible redaction, use
 `ctx.store.put/token_for/original_for` and the token helpers in
 `aiproxy/processors/tokens.py`. Scope every stored mapping by
 `ctx.session_id`.
+
+> **Contributing to aiproxy itself?** The developer guide
+> [`DEVELOPING.md`](DEVELOPING.md) covers the architecture internals, the
+> `Document`/`Processor`/`Store` abstractions, how to make common changes, the
+> tag-based release flow, and the PR workflow and checklist.
+
+### Drop-in plugins (no code edit)
+For an organization, a reviewed processor can be loaded without editing
+`registry.py` — dropped as a file or installed as a pip package — and enabled
+with a one-line `pipeline:` change. This **executes code with full proxy
+privileges**, so it is an admin path (default off), gated by review,
+name-collision refusal and audit logging. Full workflow and the `plugins:`
+config block: [`docs/WRITING_A_PROCESSOR.md`](WRITING_A_PROCESSOR.md).
 
 ---
 
@@ -376,3 +595,17 @@ no copyleft dependencies — PyMuPDF (AGPL-3.0) was replaced with pypdfium2
 (BSD/Apache) so the whole service can be offered under noncommercial-only
 terms. Local model weights (e.g. Llama 3.2, Qwen2.5) are licensed by their
 publishers and are the operator's responsibility; aiproxy bundles no weights.
+
+---
+
+## 11. Support this project ☕
+
+aiproxy is free, open, and keeps your data on your own machine — the project
+earns nothing from your using it. If it saves you from leaking PII to an LLM
+provider, please consider supporting continued development:
+
+**→ [Buy me a coffee](https://buymeacoffee.com/cucoo)**
+
+Even one coffee is genuine encouragement and funds new filters, better name
+recall, and keeping these docs current. If your team depends on aiproxy, a few
+coffees — or just sharing it — goes a long way. Thank you.

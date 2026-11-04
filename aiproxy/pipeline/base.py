@@ -60,12 +60,15 @@ class SessionContext:
     """
 
     def __init__(self, session_id: str, store, config: dict, archive=None,
-                 log=None):
+                 log=None, user_id: str = "anon"):
         self.session_id = session_id
         self.store = store
         self.config = config
         self.archive = archive  # DocArchive or None (disk doc cache/archive)
         self.log = log  # RedactionLog or None (debug JSONL of redactions)
+        # Resolved identity (Phase 2). Mappings are isolated per user by
+        # namespacing session_id; user_id also keys the per-user term tier.
+        self.user_id = user_id
 
 
 class Processor(ABC):

@@ -1,5 +1,11 @@
 # aiproxy
 
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support%20the%20project-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/cucoo)
+
+> aiproxy is free and keeps your data on your machine. If it saves you from
+> leaking PII to an LLM provider, **[buy me a coffee ☕](https://buymeacoffee.com/cucoo)** —
+> it funds the time that keeps the project maintained.
+
 Anonymizing reverse proxy for LLM APIs. Point Claude Code (or any AI tool)
 at aiproxy; it scrubs people/company names and other sensitive content with
 a **local** LLM before forwarding to Anthropic, then restores the originals
@@ -13,25 +19,85 @@ AI tool ──▶ aiproxy ──(redacted)──▶ Anthropic
 ```
 
 - Reversible anonymization: originals ↔ tokens kept in a local encrypted store.
-- One `Processor` interface — drop in your own filters.
+- One `Processor` interface — drop in your own filters (or reviewed [plugins](docs/WRITING_A_PROCESSOR.md)).
 - Ships: `secrets_regex`, `anonymizer` (local-LLM NER), `image_redactor`, `logger`.
 - `/dryrun` endpoint to preview redactions before trusting it.
+- Scales to a shared org service: per-user identity + isolation, self-service
+  term lists (`/terms`), SQLite **or** Postgres store, config hot-reload
+  (`SIGHUP`), secrets-manager key sourcing, `/readyz`. See
+  [`docs/ORG_DEPLOYMENT.md`](docs/ORG_DEPLOYMENT.md).
 
 Full install + usage: [`docs/MANUAL.md`](docs/MANUAL.md).
 
-## Install (one command)
-The installer sets up the venv + deps, Ollama (and starts it), Tesseract,
-the NER models your config needs, a store key, and `config.yaml`.
+> ⚠️ **Use at your own risk — no warranty.** aiproxy is provided *as is*,
+> without warranty of any kind (see the **No Liability** clause in
+> [`LICENSE`](LICENSE)). Detection is **not guaranteed**: a local LLM can miss
+> an entity, so a real value can still reach the upstream provider. You are
+> responsible for validating redaction for your own data and for any
+> obligations you have to the people whose data you process. Run it in
+> `fail_closed` mode, verify with `/dryrun`, and treat the mapping store as a
+> secret. See the [threat model](docs/MANUAL.md#threat-model).
 
-**macOS / Linux**
+## Architecture
+The pipeline redacts on the way out and restores on the way in; the upstream
+API only ever sees tokens. Both directions share the encrypted store and the
+local NER model.
+
+```mermaid
+flowchart LR
+  C["AI client"] --> I["Ingress · identity<br/>resolve user_id<br/>session = user/raw"]
+  I --> P
+  subgraph P["Pipeline"]
+    direction TB
+    L["logger"] --> S["secrets_regex"] --> A["anonymizer · NER → ⟦TOKEN⟧"] --> IR["image_redactor"]
+  end
+  P -- "redacted + tokens" --> U["Upstream LLM<br/>(sees tokens only)"]
+  U -- "tokens" --> P
+  P -- "originals restored" --> C
+  A <-- "detect" --> N["Local NER (Ollama)"]
+  P <-- "put / token_for · cache · terms" --> ST[("Store · encrypted<br/>sqlite | postgres")]
+  K["Key source<br/>env | file | command"] -. "at-rest key" .-> ST
+```
+
+Scaled to a shared org service it runs stateless frontends behind a load
+balancer over a shared Postgres store and NER service — diagrams and design in
+[`docs/MANUAL.md#1b-architecture`](docs/MANUAL.md#1b-architecture) and
+[`docs/ORG_DEPLOYMENT.md`](docs/ORG_DEPLOYMENT.md).
+
+## Install
+
+First get the code (needs `git` and Python ≥ 3.11):
 ```bash
-./install.sh
-```
-**Windows (PowerShell)**
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install.ps1
+git clone https://github.com/cucooOnGithub/aiproxy.git aiproxy
+cd aiproxy
 ```
 
+Then pick a deployment shape. Full detail for each is in the manual:
+[single workstation](docs/MANUAL.md#2-install--single-workstation) ·
+[organization](docs/MANUAL.md#2b-install--organization).
+
+### A · Single workstation
+One person, one machine; local SQLite store and local NER model.
+
+**Requirements**
+
+| | Minimum | Comfortable |
+|---|---|---|
+| OS | macOS, Linux, or Windows 10+ | same |
+| Python | 3.11+ | 3.11+ |
+| RAM free | 6 GB (CPU-only NER) | 8 GB+ |
+| GPU | none — runs on CPU | any GPU with ≥ 4 GB VRAM (much faster NER + pre-warm) |
+| Disk | ~4 GB (deps + the 3B NER model) | SSD |
+| Also installed | Ollama (local LLM runtime) and the Tesseract OCR binary — the installer handles both | |
+
+The default NER model is `qwen2.5:3b-instruct` (~2 GB). OCR runs on CPU.
+
+**One-command install** — sets up the venv + deps, Ollama (and starts it),
+Tesseract, the NER model, a store key, and `config.yaml`:
+```bash
+./install.sh                                           # macOS / Linux
+powershell -ExecutionPolicy Bypass -File .\install.ps1 # Windows
+```
 Then verify and run:
 ```bash
 python -m aiproxy doctor --config config.yaml   # check everything is set up
@@ -39,18 +105,11 @@ python -m aiproxy serve  --config config.yaml
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8080  # match listen.port
 ```
 
-### Build a standalone binary (optional)
-Produce one self-contained executable (no Python needed to run it):
-```bash
-./build.sh                                        # -> dist/aiproxy  (macOS/Linux)
-powershell -ExecutionPolicy Bypass -File .\build.ps1   # -> dist\aiproxy.exe (Windows)
-./dist/aiproxy serve --config config.yaml
-```
-PyInstaller can't cross-compile — build on each target OS. Tesseract and
-Ollama are **not** bundled; install them as above. Details in
-[docs/MANUAL.md](docs/MANUAL.md#build-a-standalone-binary-optional).
+Up and running? If aiproxy is now keeping your data private, consider
+[**buying me a coffee ☕**](https://buymeacoffee.com/cucoo) to support it.
 
-### Manual quick start (if you skip the installer)
+<details><summary>Manual quick start (skip the installer)</summary>
+
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[media]"                    # core; needs the tesseract binary
@@ -59,9 +118,53 @@ cp config.example.yaml config.yaml
 export AIPROXY_STORE_KEY="$(python -m aiproxy genkey)"   # if store.encrypt: true
 python -m aiproxy serve --config config.yaml
 ```
+</details>
+
+<details><summary>Build a standalone binary (optional)</summary>
+
+```bash
+./build.sh                                        # -> dist/aiproxy  (macOS/Linux)
+powershell -ExecutionPolicy Bypass -File .\build.ps1   # -> dist\aiproxy.exe (Windows)
+./dist/aiproxy serve --config config.yaml
+```
+PyInstaller can't cross-compile — build on each target OS. Tesseract and
+Ollama are **not** bundled. Details in
+[docs/MANUAL.md](docs/MANUAL.md#build-a-standalone-binary-optional).
+</details>
+
+### B · Organization (shared service)
+Many users behind one service: central config owned by IT/security, per-user
+isolation, SQLite **or** Postgres, stateless frontends behind a load balancer.
+Full rollout and config in
+[docs/ORG_DEPLOYMENT.md](docs/ORG_DEPLOYMENT.md) and
+[the manual](docs/MANUAL.md#2b-install--organization).
+
+**Improving the local LLM at org scale.** On a workstation the NER model is
+kept small so it loads fast per request; a shared deployment removes that
+constraint and can run a far more accurate model:
+- **Promote NER to a dedicated warm GPU host** shared by every replica — the
+  model is loaded once and stays resident, so bigger models become viable.
+- **Use a larger model or an ensemble** for higher recall:
+  `llm.models: [qwen2.5:7b-instruct, llama3.1:8b]` (union of detections;
+  latency is the sum, so only practical when warm and shared). Budget
+  ~8–16 GB VRAM for a 7–8B model, more for an ensemble.
+- **Keep it resident** with `llm.keep_alive` so no request pays a cold load.
+- **Tune for your data**: expand `llm.entity_types`, adjust the NER `prompt`,
+  and grow the `anonymizer.name_gazetteer` from your directory (HR/AD) for
+  deterministic recall the model alone would miss.
+
+## Contributing
+Developers: [`docs/DEVELOPING.md`](docs/DEVELOPING.md) explains the
+architecture, the `Document`/`Processor`/`Store` abstractions, how to make
+common changes, the SemVer/tag release flow, and the PR workflow and checklist.
+Shipping a custom redaction filter without touching core?
+[`docs/WRITING_A_PROCESSOR.md`](docs/WRITING_A_PROCESSOR.md).
+
+Not a coder? You can still help the project a lot by
+[**buying me a coffee ☕**](https://buymeacoffee.com/cucoo) or sharing it.
 
 ## Status
-Working, 60 passing tests. Not yet smoke-tested against live providers
+Working, 97 passing tests. Not yet smoke-tested against live providers
 except the local echo round-trip below.
 
 - **Providers**: Anthropic (`/v1/messages`) and OpenAI
@@ -118,11 +221,18 @@ hosted LLM providers while still using AI tools. Business and compliance
 rationale (GDPR/minimization, pseudonymization, honest limits): see
 [docs/BUSINESS_JUSTIFICATION.md](docs/BUSINESS_JUSTIFICATION.md).
 
-## Support
+## Support this project ☕
 
-If aiproxy helps you, you can
-[buy me a coffee](https://www.buymeacoffee.com/YOUR_HANDLE) (replace
-`YOUR_HANDLE` with your Buy Me a Coffee username).
+aiproxy is built and maintained in the open, for free, by one person. There's
+no company behind it and no telemetry — your data never leaves your machine, so
+the project earns nothing from using it. If it's useful to you or your team,
+please consider chipping in:
+
+### → [**Buy me a coffee**](https://buymeacoffee.com/cucoo)
+
+Even a single coffee is real encouragement and directly funds new filters,
+better name recall, and keeping the docs and releases current. If your company
+relies on it, a few coffees (or sharing the project) goes a long way. Thank you.
 
 ## License
 

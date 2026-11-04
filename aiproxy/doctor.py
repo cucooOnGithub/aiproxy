@@ -63,7 +63,9 @@ def run_checks(config_path: str) -> list[Result]:
         # Store openable + encryption key present when required
         s = cfg.get("store", {})
         enc = bool(s.get("encrypt"))
-        if enc and not os.environ.get("AIPROXY_STORE_KEY"):
+        key_source = (s.get("key_source") or "env").lower()
+        if enc and key_source == "env" and not os.environ.get(
+                s.get("key_env", "AIPROXY_STORE_KEY")):
             out.append(Result("store key (AIPROXY_STORE_KEY)", False, True,
                               "encrypt:true but key not set; run: aiproxy genkey"))
         else:
