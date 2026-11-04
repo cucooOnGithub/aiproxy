@@ -66,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_config(args.config)
         from aiproxy.proxy.server import create_app
 
-        app = create_app(cfg)
+        app = create_app(cfg, config_path=args.config)
         listen = cfg["listen"]
         uvicorn.run(app, host=listen["host"], port=listen["port"])
         return 0

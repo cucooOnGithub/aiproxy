@@ -66,6 +66,15 @@ class Anonymizer(Processor):
         # min length avoids pathological substring matches on short strings.
         self.sweep_known = bool(config.get("known_value_sweep", True))
         self.sweep_min_len = max(1, int(config.get("known_value_sweep_min_len", 4)))
+        # Per-user term tier (Phase 3): org terms above are mandatory for all
+        # users; a user may ADD their own always_tokenize/denylist entries via
+        # the store. Merged at request time, cached per user with a short TTL
+        # so a self-service add takes effect within `user_terms_ttl` seconds
+        # without a restart. Cache is process-local and thread-safe.
+        self.user_terms_ttl = float(config.get("user_terms_ttl", 30))
+        self._ut_cache: dict[str, tuple[float, set, set]] = {}
+        import threading as _th
+        self._ut_lock = _th.Lock()
 
     @staticmethod
     def _load_gazetteer(path) -> set[str]:
@@ -123,6 +132,33 @@ class Anonymizer(Processor):
             i = j + 1
         return out
 
+    def _effective_terms(self, ctx: SessionContext) -> tuple[set, set]:
+        """(deny, always_tokenize) = org tier ∪ this user's self-added tier.
+
+        The user tier can only ADD (the store write layer enforces that it
+        never removes/allowlists an org entry), so a plain union is safe and
+        can never weaken org coverage. Cached per user_id with a TTL.
+        """
+        user_id = getattr(ctx, "user_id", "anon")
+        store = getattr(ctx, "store", None)
+        if store is None or not hasattr(store, "user_terms"):
+            return self.deny, self.always_tok
+        import time as _t
+        now = _t.monotonic()
+        with self._ut_lock:
+            hit = self._ut_cache.get(user_id)
+            if hit and (now - hit[0]) < self.user_terms_ttl:
+                return hit[1], hit[2]
+        try:
+            ut = store.user_terms(user_id)
+        except Exception:  # noqa: BLE001 - store hiccup must not drop org terms
+            return self.deny, self.always_tok
+        deny = self.deny | set(ut.get("denylist", []))
+        always = self.always_tok | set(ut.get("always_tokenize", []))
+        with self._ut_lock:
+            self._ut_cache[user_id] = (now, deny, always)
+        return deny, always
+
     def _seq(self, ctx: SessionContext) -> int:
         # Per-session, persisted in the store: a SessionContext is recreated
         # per request, so a ctx-local counter restarts at 1 each request and
@@ -132,19 +168,28 @@ class Anonymizer(Processor):
     def _action(self, etype: str) -> str:
         return self.actions.get(etype, "ignore")
 
-    def _detect(self, text: str) -> list[Entity]:
-        """NER + denylist entities. Raises on NER failure (caller decides)."""
+    def _detect(self, text: str, deny: set | None = None,
+                always: set | None = None) -> list[Entity]:
+        """NER + denylist entities. Raises on NER failure (caller decides).
+
+        `deny`/`always` default to the org tier; callers pass the effective
+        (org ∪ user) sets so per-user terms are detected too."""
+        deny = self.deny if deny is None else deny
+        always = self.always_tok if always is None else always
         ents = list(self.ner.detect(text))
-        ents += [Entity(d, "OTHER") for d in self.deny if d in text]
-        ents += [Entity(s, "TERM") for s in self.always_tok if s in text]
+        ents += [Entity(d, "OTHER") for d in deny if d in text]
+        ents += [Entity(s, "TERM") for s in always if s in text]
         ents += self._gazetteer_entities(text)
         return ents
 
     def _tokenize(self, text: str, ents: list[Entity],
-                  ctx: SessionContext) -> str:
+                  ctx: SessionContext, deny: set | None = None,
+                  always: set | None = None) -> str:
         """Replace each actionable entity with a reversible token (or
         [REDACTED]), recording token<->original in the store. Shared by the
         plain-text and Office paths so tokens stay consistent."""
+        deny = self.deny if deny is None else deny
+        always = self.always_tok if always is None else always
         # Longest-first so overlapping names replace cleanly.
         for ent in sorted(ents, key=lambda e: len(e.text), reverse=True):
             if ent.text in self.allow or not ent.text.strip():
@@ -160,9 +205,9 @@ class Anonymizer(Processor):
             # that never appears in the output, polluting the store and counts.
             if ent.text not in text:
                 continue
-            if ent.text in self.deny:
+            if ent.text in deny:
                 action = "redact"          # irreversible [REDACTED]
-            elif ent.text in self.always_tok:
+            elif ent.text in always:
                 action = "anonymize"       # reversible token, forced on
             else:
                 action = self._action(ent.type)
@@ -197,6 +242,7 @@ class Anonymizer(Processor):
         return text
 
     def process_request(self, doc: Document, ctx: SessionContext) -> Document:
+        deny, always = self._effective_terms(ctx)
         for part in doc.text_parts():
             text = part.text or ""
 
@@ -215,14 +261,14 @@ class Anonymizer(Processor):
                 continue
 
             try:
-                ents = self._detect(text)
+                ents = self._detect(text, deny, always)
             except Exception as e:  # noqa: BLE001
                 if self.mode == "fail_closed":
                     METRICS.inc("ner_blocks")
                     raise AnonymizerError(f"NER failed, blocking send: {e}") from e
                 continue  # fail_open: send as-is
 
-            text = self._tokenize(text, ents, ctx)
+            text = self._tokenize(text, ents, ctx, deny, always)
             part.text = text
             ctx.store.cache_put(ctx.session_id, self.name, h, text)
             METRICS.inc("text_parts_redacted")
@@ -233,7 +279,8 @@ class Anonymizer(Processor):
         for part in doc.parts:
             if part.kind is PartKind.OFFICE and part.data:
                 try:
-                    part.data = self._redact_office(part.data, ctx, part)
+                    part.data = self._redact_office(part.data, ctx, part,
+                                                    deny, always)
                     METRICS.inc("doc:office")
                 except AnonymizerError:
                     raise
@@ -244,7 +291,8 @@ class Anonymizer(Processor):
         return doc
 
     def _redact_office(self, data: bytes, ctx: SessionContext,
-                       part=None) -> bytes:
+                       part=None, deny: set | None = None,
+                       always: set | None = None) -> bytes:
         """Tokenize body text inside an OOXML doc (docx/pptx/xlsx), reversibly.
 
         Text lives in `<w:t>` / `<a:t>` / `<t>` elements. We edit those text
@@ -298,7 +346,7 @@ class Anonymizer(Processor):
                     inners.append(m.group(3))
 
         joined = "\n".join(inners)
-        ents: list[Entity] = self._detect(joined) if inners else []
+        ents: list[Entity] = self._detect(joined, deny, always) if inners else []
         # Deterministic email catch (regex) in addition to NER, so emails in
         # the document body are always tokenized even when the model misses
         # them. Deduped against emails NER already found.
@@ -311,7 +359,8 @@ class Anonymizer(Processor):
             inner = m.group(3)
             if not inner.strip():
                 return m.group(0)
-            return f"<{m.group(1)}{m.group(2)}>{self._tokenize(inner, ents, ctx)}" \
+            return f"<{m.group(1)}{m.group(2)}>" \
+                   f"{self._tokenize(inner, ents, ctx, deny, always)}" \
                    f"</{m.group(1)}>"
 
         out_buf = _io.BytesIO()

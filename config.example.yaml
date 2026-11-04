@@ -98,7 +98,13 @@ anonymizer:
     EMAIL: anonymize
     PHONE: anonymize
   allowlist: []     # strings never redacted (e.g. your own company)
-  denylist: []      # strings always redacted
+  denylist: []      # strings always redacted (ORG tier; mandatory for all)
+  # Per-user term tier (Phase 3): each user may self-add their own
+  # always_tokenize/denylist entries via /terms (the dashboard page) or the
+  # /api/terms endpoint; they apply to that user ONLY and merge on top of the
+  # org lists above (additive — a user can never weaken org coverage). Added
+  # terms take effect within this many seconds without a restart.
+  user_terms_ttl: 30
   # Known-name gazetteer: a file of name PARTS (one per line, given names and
   # surnames mixed). Adjacent capitalized tokens whose lowercase form is in
   # the file are joined into one PERSON (e.g. Maria + Silva -> Maria Silva),
@@ -112,9 +118,41 @@ image_redactor:
   max_pages: 20
 
 store:
+  # backend: sqlite (default, single-box) | postgres (multi-replica scale-out)
   backend: sqlite
-  path: ./map.db
-  encrypt: true     # requires env AIPROXY_STORE_KEY (python -m aiproxy genkey)
+  path: ./map.db          # sqlite only
+  # dsn: postgresql://user:pass@host:5432/aiproxy   # postgres only
+  encrypt: true     # requires an at-rest key (python -m aiproxy genkey)
+  # Where the at-rest key comes from (Phase 4). Keeps no long-lived secret in
+  # this file. env (default) | file | command.
+  # key_source: env
+  # key_env: AIPROXY_STORE_KEY          # env source: which variable
+  # key_path: /run/secrets/aiproxy_key  # file source: a mounted secret file
+  # key_command: "vault kv get -field=key secret/aiproxy"  # command source
+  #                                      # stdout is the key (shell out to a
+  #                                      # secrets manager / KMS CLI)
+
+# Identity resolution at ingress (Phase 2). Namespaces mappings per user so
+# one user can never reverse another's tokens. Omit for single-box use.
+# identity:
+#   source: anonymous            # anonymous (default) | api_key | header
+#   # api_key: map the inbound x-api-key / bearer token to a stable user id
+#   # keys:
+#   #   sk-abc123: alice
+#   #   sk-def456: bob
+#   # header: trust a signed identity header injected by an SSO/OIDC gateway
+#   #         in front of the proxy (the gateway must strip client copies)
+#   header: x-auth-user
+
+# Drop-in custom processors (Phase 6). DEFAULT OFF — loading a plugin runs
+# arbitrary code with full proxy privileges, so this is an ADMIN path: users
+# submit processors, admins review and place them. See docs/WRITING_A_PROCESSOR.md.
+# plugins:
+#   enabled: false
+#   dir: /etc/aiproxy/plugins     # loose reviewed .py files, or:
+#   entry_points: true            # pip-installed packages (group below)
+#   entry_point_group: aiproxy.processors
+#   allow: []                     # optional: only load these plugin names
 
 # Optional on-disk archive of REDACTED documents, keyed by a hash of the
 # original. Doubles as a cache: re-presenting the same document reads the

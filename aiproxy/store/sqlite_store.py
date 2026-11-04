@@ -52,6 +52,20 @@ CREATE TABLE IF NOT EXISTS seq_counters (
     session_id  TEXT PRIMARY KEY,
     n           INTEGER NOT NULL
 );
+
+-- Per-user term lists (Phase 3): strings a user self-adds to be masked on
+-- THEIR OWN requests only. `kind` is 'always_tokenize' (reversible ⟦TERM_n⟧)
+-- or 'denylist' (irreversible [REDACTED]). This is the user tier; the org
+-- tier lives in central config and is merged on top at request time. The
+-- governance rule (user may only ADD, never weaken the org tier) is enforced
+-- at the API/write layer; this table only ever holds additive user entries.
+CREATE TABLE IF NOT EXISTS user_terms (
+    user_id     TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    value       TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, kind, value)
+);
 """
 
 # Trailing "_<number>" in a token like ⟦PERSON_12⟧ (entity types carry no digits).
@@ -189,6 +203,36 @@ class SqliteStore:
             "mappings_by_type": by_type,
             "cached_documents": cached,
         }
+
+    # --- per-user term lists (Phase 3) ---------------------------------
+    def user_terms(self, user_id: str) -> dict[str, list[str]]:
+        """Every self-added term for a user, grouped by kind."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT kind, value FROM user_terms WHERE user_id=?",
+                (user_id,),
+            ).fetchall()
+        out: dict[str, list[str]] = {}
+        for kind, value in rows:
+            out.setdefault(kind, []).append(value)
+        return out
+
+    def add_user_term(self, user_id: str, kind: str, value: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO user_terms (user_id, kind, value) "
+                "VALUES (?,?,?)", (user_id, kind, value),
+            )
+            self._conn.commit()
+
+    def remove_user_term(self, user_id: str, kind: str, value: str) -> int:
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM user_terms WHERE user_id=? AND kind=? AND value=?",
+                (user_id, kind, value),
+            )
+            self._conn.commit()
+            return cur.rowcount
 
     # --- per-text redaction cache --------------------------------------
     @staticmethod
