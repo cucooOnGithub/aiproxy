@@ -46,6 +46,12 @@ class Anonymizer(Processor):
         self.actions: dict[str, str] = config.get("entities", {})
         self.allow = set(config.get("allowlist", []))
         self.deny = set(config.get("denylist", []))
+        # always_tokenize: strings always masked but REVERSIBLY (a ⟦TERM_n⟧
+        # token, restored on the response), unlike denylist which replaces
+        # with irreversible [REDACTED]. Use for known-sensitive values you
+        # still want Claude to reproduce in its output (e.g. a client name
+        # that must appear in generated documents but never reach upstream).
+        self.always_tok = set(config.get("always_tokenize", []))
         self.mode = config.get("mode", "fail_closed")
         # Optional name gazetteer: a file of known name PARTS (one per line,
         # given names and surnames mixed). Adjacent capitalized tokens whose
@@ -54,6 +60,12 @@ class Anonymizer(Processor):
         # names the LLM misses. min_parts sets the shortest run that counts.
         self.gazetteer = self._load_gazetteer(config.get("name_gazetteer"))
         self.gaz_min_parts = max(1, int(config.get("name_gazetteer_min_parts", 1)))
+        # Known-value sweep: re-mask any value already tokenized earlier in the
+        # session, even in blocks where the NER misses it this turn. Closes the
+        # 'caught once, leaked later' recall gap (the biggest leak source). A
+        # min length avoids pathological substring matches on short strings.
+        self.sweep_known = bool(config.get("known_value_sweep", True))
+        self.sweep_min_len = max(1, int(config.get("known_value_sweep_min_len", 4)))
 
     @staticmethod
     def _load_gazetteer(path) -> set[str]:
@@ -66,25 +78,49 @@ class Anonymizer(Processor):
         except OSError:
             return set()
 
+    # Separators that may join parts of one name: dot, underscore, hyphen and a
+    # single space (covers "Maria Silva", "john.rivera", "john_rivera",
+    # "J. Rivera"). Kept short so we never join across unrelated text.
+    _NAME_SEP = set(". _-")
+
     def _gazetteer_entities(self, text: str) -> list[Entity]:
-        """Join runs of adjacent capitalized, known name-parts into PERSON
-        entities. Requires title/upper-case to avoid matching lowercase words
-        that happen to share a name's spelling."""
+        """Find names composed of known gazetteer parts, joined by spaces OR by
+        '.'/'_'/'-' (so dotted/underscored identifiers like 'john.rivera',
+        including inside a path, are caught), and handle an initial before a
+        known surname ('J. Rivera'). Matching is case-insensitive and NOT
+        gated on capitalization - that is how the lowercase dotted username was
+        leaking - so precision rests on the curated names.txt. The emitted
+        entity text is the exact substring so the tokenizer can replace it."""
         if not self.gazetteer:
             return []
         import re as _re
+        toks = []
+        for m in _re.finditer(r"[A-Za-z]+", text):
+            w = m.group(0)
+            toks.append({"s": m.start(), "e": m.end(),
+                         "known": w.lower() in self.gazetteer,
+                         "initial": len(w) == 1 and w.isupper()})
         out: list[Entity] = []
-        run: list[str] = []
-        for tok in _re.finditer(r"\S+", text):
-            core = tok.group(0).strip(".,;:!?\"'()[]{}<>«»…")
-            if core[:1].isupper() and core.lower() in self.gazetteer:
-                run.append(core)
-            else:
-                if len(run) >= self.gaz_min_parts:
-                    out.append(Entity(" ".join(run), "PERSON"))
-                run = []
-        if len(run) >= self.gaz_min_parts:
-            out.append(Entity(" ".join(run), "PERSON"))
+        i, n = 0, len(toks)
+        while i < n:
+            if not (toks[i]["known"] or toks[i]["initial"]):
+                i += 1
+                continue
+            j = i
+            while j + 1 < n:
+                gap = text[toks[j]["e"]:toks[j + 1]["s"]]
+                nxt = toks[j + 1]
+                if (gap and len(gap) <= 2 and all(c in self._NAME_SEP for c in gap)
+                        and (nxt["known"] or nxt["initial"])):
+                    j += 1
+                else:
+                    break
+            run = toks[i:j + 1]
+            # Need enough parts AND at least one real (non-initial) known part,
+            # so a lone/bare initial never counts as a name.
+            if len(run) >= self.gaz_min_parts and any(r["known"] for r in run):
+                out.append(Entity(text[run[0]["s"]:run[-1]["e"]], "PERSON"))
+            i = j + 1
         return out
 
     def _seq(self, ctx: SessionContext) -> int:
@@ -100,6 +136,7 @@ class Anonymizer(Processor):
         """NER + denylist entities. Raises on NER failure (caller decides)."""
         ents = list(self.ner.detect(text))
         ents += [Entity(d, "OTHER") for d in self.deny if d in text]
+        ents += [Entity(s, "TERM") for s in self.always_tok if s in text]
         ents += self._gazetteer_entities(text)
         return ents
 
@@ -123,7 +160,12 @@ class Anonymizer(Processor):
             # that never appears in the output, polluting the store and counts.
             if ent.text not in text:
                 continue
-            action = "redact" if ent.text in self.deny else self._action(ent.type)
+            if ent.text in self.deny:
+                action = "redact"          # irreversible [REDACTED]
+            elif ent.text in self.always_tok:
+                action = "anonymize"       # reversible token, forced on
+            else:
+                action = self._action(ent.type)
             if action == "ignore":
                 continue
             token = ctx.store.token_for(ctx.session_id, ent.text, ent.type)
@@ -134,6 +176,24 @@ class Anonymizer(Processor):
             METRICS.inc(f"entity:{ent.type}")
             replacement = "[REDACTED]" if action == "redact" else token
             text = text.replace(ent.text, replacement)
+        return self._sweep_known(text, ctx)
+
+    def _sweep_known(self, text: str, ctx: SessionContext) -> str:
+        """Re-mask any value already tokenized in this session, so a value the
+        NER caught once never leaks in a later block where the model misses it
+        (the biggest recall gap). Reuses each value's existing token. Over-
+        masking here is reversed on the response path; a miss is a permanent
+        upstream leak, so we err toward masking."""
+        if not self.sweep_known:
+            return text
+        known = [(o, tok) for o, tok, _et
+                 in ctx.store.all_mappings(ctx.session_id)
+                 if len(o) >= self.sweep_min_len and not TOKEN_RE.search(o)]
+        # Longest-first so a value contained in another masks cleanly.
+        for original, token in sorted(known, key=lambda m: len(m[0]),
+                                      reverse=True):
+            if original in text:
+                text = text.replace(original, token)
         return text
 
     def process_request(self, doc: Document, ctx: SessionContext) -> Document:
@@ -147,7 +207,10 @@ class Anonymizer(Processor):
             h = ctx.store.text_hash(text)
             cached = ctx.store.cache_get(ctx.session_id, self.name, h)
             if cached is not None:
-                part.text = cached
+                # Still sweep: the cached output was masked for what was known
+                # when it was first processed; values tokenized since (in other
+                # blocks) must be re-masked here too, or they leak on resend.
+                part.text = self._sweep_known(cached, ctx)
                 METRICS.inc("cache_hits")
                 continue
 

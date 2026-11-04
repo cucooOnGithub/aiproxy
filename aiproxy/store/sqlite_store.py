@@ -134,6 +134,21 @@ class SqliteStore:
                 return token
         return None
 
+    def all_mappings(self, session_id: str) -> list[tuple[str, str, str]]:
+        """Every (original, token, entity_type) for a session, decrypted.
+
+        Used by the anonymizer's known-value sweep to re-mask any value that
+        was tokenized earlier in the session, even in blocks where the NER
+        misses it this turn - closing the 'caught once, leaked later' gap.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT original, token, entity_type FROM mappings "
+                "WHERE session_id=?", (session_id,)
+            ).fetchall()
+        return [(self.cipher.decrypt(enc).decode(), tok, et)
+                for enc, tok, et in rows]
+
     def original_for(self, session_id: str, token: str) -> str | None:
         with self._lock:
             row = self._conn.execute(
