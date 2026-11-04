@@ -14,6 +14,22 @@ from aiproxy.document import Document, PartKind
 from aiproxy.pipeline.base import Processor, SessionContext
 from aiproxy.processors.tokens import TOKEN_RE, make_token
 
+# A real phone number has ~9-15 digits (E.164 caps at 15). The loose PHONE
+# pattern also matches version/filename strings like "v2.0 (002) (003)", which
+# carry too few digits - and redacting them corrupts the task (the model loses
+# the literal number). Require a phone-plausible digit count.
+_PHONE_MIN_DIGITS = 9
+_PHONE_MAX_DIGITS = 15
+
+
+def _accept(etype: str, match: str) -> bool:
+    """Reject regex matches that fit the shape but aren't really the thing."""
+    if etype == "PHONE":
+        d = sum(c.isdigit() for c in match)
+        return _PHONE_MIN_DIGITS <= d <= _PHONE_MAX_DIGITS
+    return True
+
+
 _PATTERNS: dict[str, re.Pattern] = {
     "EMAIL": re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"),
     "APIKEY": re.compile(r"\b(?:sk|pk|ghp|xox[baprs])[-_][A-Za-z0-9]{16,}\b"),
@@ -43,6 +59,8 @@ class SecretsRegex(Processor):
                     continue
                 for m in list(pat.finditer(text)):
                     original = m.group(0)
+                    if not _accept(etype, original):
+                        continue
                     token = ctx.store.token_for(ctx.session_id, original, etype)
                     if token is None:
                         token = make_token(etype, self._seq(ctx))

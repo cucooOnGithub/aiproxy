@@ -36,7 +36,10 @@ llm:
                        # a reloaded model never re-runs NER on cached text
   # Entity types the model may return (also enum-constrains the JSON schema).
   # Add a custom type here AND give it an action under `anonymizer.entities`.
-  entity_types: [PERSON, ORG, LOCATION, EMAIL, PHONE]
+  # PHONE is intentionally omitted: the deterministic secrets_regex (with a
+  # digit-count check) handles real phone numbers far more reliably, while the
+  # 3B model kept labelling version/filename strings like "v2" as PHONE.
+  entity_types: [PERSON, ORG, LOCATION, EMAIL]
   # Override the NER prompt. MUST contain {text}; {types} is optional and is
   # filled from entity_types above. Default detects the standard PII types.
   # prompt: |

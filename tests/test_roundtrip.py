@@ -46,6 +46,20 @@ def test_same_value_same_token():
     assert out.parts[0].text.count("⟦EMAIL_1⟧") == 2
 
 
+def test_phone_ignores_version_strings():
+    """The loose PHONE pattern matches "v2.0 (002) (003)"-style strings, but
+    they have too few digits to be a phone. Redacting them corrupted the task
+    (the model lost the literal version number), so they must pass through."""
+    proc = SecretsRegex({})
+    ctx = _ctx()
+    doc = Document(parts=[Part(PartKind.TEXT, text=(
+        'create v2.0 (002) (003) version; call +351 912 345 678 after'))])
+    out = proc.process_request(doc, ctx).parts[0].text
+    assert "v2.0 (002) (003)" in out          # version string untouched
+    assert "+351 912 345 678" not in out        # real phone redacted
+    assert "⟦PHONE_1⟧" in out
+
+
 def test_tokens_dont_collide_across_requests():
     """Each HTTP request builds a fresh SessionContext for the same session.
     The token sequence must keep counting across requests, not restart at 1,
