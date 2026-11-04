@@ -49,19 +49,34 @@ balancer over a shared Postgres store and NER service — diagrams and design in
 [`docs/MANUAL.md#1b-architecture`](docs/MANUAL.md#1b-architecture) and
 [`docs/ORG_DEPLOYMENT.md`](docs/ORG_DEPLOYMENT.md).
 
-## Install (one command)
-The installer sets up the venv + deps, Ollama (and starts it), Tesseract,
-the NER models your config needs, a store key, and `config.yaml`.
+## Install
 
-**macOS / Linux**
+Two deployment shapes — pick the one that fits. Full detail for each is in the
+manual: [single workstation](docs/MANUAL.md#2-install--single-workstation) ·
+[organization](docs/MANUAL.md#2b-install--organization).
+
+### A · Single workstation
+One person, one machine; local SQLite store and local NER model.
+
+**Requirements**
+
+| | Minimum | Comfortable |
+|---|---|---|
+| OS | macOS, Linux, or Windows 10+ | same |
+| Python | 3.11+ | 3.11+ |
+| RAM free | 6 GB (CPU-only NER) | 8 GB+ |
+| GPU | none — runs on CPU | any GPU with ≥ 4 GB VRAM (much faster NER + pre-warm) |
+| Disk | ~4 GB (deps + the 3B NER model) | SSD |
+| Also installed | Ollama (local LLM runtime) and the Tesseract OCR binary — the installer handles both | |
+
+The default NER model is `qwen2.5:3b-instruct` (~2 GB). OCR runs on CPU.
+
+**One-command install** — sets up the venv + deps, Ollama (and starts it),
+Tesseract, the NER model, a store key, and `config.yaml`:
 ```bash
-./install.sh
+./install.sh                                           # macOS / Linux
+powershell -ExecutionPolicy Bypass -File .\install.ps1 # Windows
 ```
-**Windows (PowerShell)**
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install.ps1
-```
-
 Then verify and run:
 ```bash
 python -m aiproxy doctor --config config.yaml   # check everything is set up
@@ -69,18 +84,8 @@ python -m aiproxy serve  --config config.yaml
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8080  # match listen.port
 ```
 
-### Build a standalone binary (optional)
-Produce one self-contained executable (no Python needed to run it):
-```bash
-./build.sh                                        # -> dist/aiproxy  (macOS/Linux)
-powershell -ExecutionPolicy Bypass -File .\build.ps1   # -> dist\aiproxy.exe (Windows)
-./dist/aiproxy serve --config config.yaml
-```
-PyInstaller can't cross-compile — build on each target OS. Tesseract and
-Ollama are **not** bundled; install them as above. Details in
-[docs/MANUAL.md](docs/MANUAL.md#build-a-standalone-binary-optional).
+<details><summary>Manual quick start (skip the installer)</summary>
 
-### Manual quick start (if you skip the installer)
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[media]"                    # core; needs the tesseract binary
@@ -89,9 +94,43 @@ cp config.example.yaml config.yaml
 export AIPROXY_STORE_KEY="$(python -m aiproxy genkey)"   # if store.encrypt: true
 python -m aiproxy serve --config config.yaml
 ```
+</details>
+
+<details><summary>Build a standalone binary (optional)</summary>
+
+```bash
+./build.sh                                        # -> dist/aiproxy  (macOS/Linux)
+powershell -ExecutionPolicy Bypass -File .\build.ps1   # -> dist\aiproxy.exe (Windows)
+./dist/aiproxy serve --config config.yaml
+```
+PyInstaller can't cross-compile — build on each target OS. Tesseract and
+Ollama are **not** bundled. Details in
+[docs/MANUAL.md](docs/MANUAL.md#build-a-standalone-binary-optional).
+</details>
+
+### B · Organization (shared service)
+Many users behind one service: central config owned by IT/security, per-user
+isolation, SQLite **or** Postgres, stateless frontends behind a load balancer.
+Full rollout and config in
+[docs/ORG_DEPLOYMENT.md](docs/ORG_DEPLOYMENT.md) and
+[the manual](docs/MANUAL.md#2b-install--organization).
+
+**Improving the local LLM at org scale.** On a workstation the NER model is
+kept small so it loads fast per request; a shared deployment removes that
+constraint and can run a far more accurate model:
+- **Promote NER to a dedicated warm GPU host** shared by every replica — the
+  model is loaded once and stays resident, so bigger models become viable.
+- **Use a larger model or an ensemble** for higher recall:
+  `llm.models: [qwen2.5:7b-instruct, llama3.1:8b]` (union of detections;
+  latency is the sum, so only practical when warm and shared). Budget
+  ~8–16 GB VRAM for a 7–8B model, more for an ensemble.
+- **Keep it resident** with `llm.keep_alive` so no request pays a cold load.
+- **Tune for your data**: expand `llm.entity_types`, adjust the NER `prompt`,
+  and grow the `anonymizer.name_gazetteer` from your directory (HR/AD) for
+  deterministic recall the model alone would miss.
 
 ## Status
-Working, 60 passing tests. Not yet smoke-tested against live providers
+Working, 97 passing tests. Not yet smoke-tested against live providers
 except the local echo round-trip below.
 
 - **Providers**: Anthropic (`/v1/messages`) and OpenAI

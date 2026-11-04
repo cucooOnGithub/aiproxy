@@ -92,10 +92,29 @@ sequencing: [`ORG_DEPLOYMENT.md`](ORG_DEPLOYMENT.md).
 
 ---
 
-## 2. Install
+## 2. Install — single workstation
 
-Requires Python ≥ 3.11. The installer handles everything else (Ollama,
-Tesseract, models, key, config).
+One person, one machine: local SQLite store and a local NER model. For a
+shared multi-user service see [§2b](#2b-install--organization).
+
+### Requirements
+
+| | Minimum | Comfortable |
+|---|---|---|
+| OS | macOS, Linux, or Windows 10+ | same |
+| Python | 3.11+ | 3.11+ |
+| RAM free | 6 GB (CPU-only NER) | 8 GB or more |
+| GPU | none — the 3B model runs on CPU | any GPU with ≥ 4 GB VRAM (much faster NER and startup pre-warm) |
+| Disk | ~4 GB (Python deps + the 3B NER model; +50–60 MB if you build the binary) | SSD |
+| Extra software | Ollama (local LLM runtime, `:11434`) and the Tesseract OCR binary — both installed for you by `install.sh` | |
+
+The default NER model is `qwen2.5:3b-instruct` (~2 GB download). Text
+anonymization needs only Ollama; the image/PDF/Office path also needs
+Tesseract. OCR runs on CPU. Latency is dominated by local NER + OCR compute,
+so a GPU is the single biggest speed-up on a workstation.
+
+The installer handles everything beyond Python (Ollama, Tesseract, models,
+key, config).
 
 ### Automatic (recommended)
 From the repo root:
@@ -171,6 +190,68 @@ Important:
 - The binary bundles Python, all pip dependencies, and pypdfium2's native
   PDFium library (~50–60 MB). It does not auto-start on boot and does not
   create `config.yaml` — ship a config beside it or pass `--config`.
+
+---
+
+## 2b. Install — organization
+
+A shared service for many users: central config owned by IT/security,
+per-user identity and isolation, and horizontal scale. The full design,
+phase-by-phase rollout and every config key are in
+[`ORG_DEPLOYMENT.md`](ORG_DEPLOYMENT.md); this section covers what differs from
+the workstation install. The topology diagram is in [§1b](#1b-architecture).
+
+### Requirements
+
+| | Notes |
+|---|---|
+| Proxy frontends | Stateless once state is external (store + NER). Each is cheap (CPU, ~1 GB RAM); run N behind a load balancer and scale horizontally. |
+| Store | SQLite is single-writer/local — fine for one box, a bottleneck for many. Use `store.backend: postgres` with a managed Postgres for multiple frontends. |
+| NER host | **One** host with a GPU, running the model warm and shared (see below). Sized for the model you choose, not per frontend. |
+| Secrets | A secrets manager / KMS for the at-rest key (`store.key_source: command`); see [`KEY_MANAGEMENT.md`](KEY_MANAGEMENT.md). |
+| Auth | An SSO/OIDC gateway in front injecting a signed identity header (`identity.source: header`), or per-user API keys (`identity.source: api_key`). |
+
+### What changes vs. a workstation
+- `store.backend: postgres` + `store.dsn` so frontends share one mapping store.
+- `identity:` to resolve a `user_id` per request (sessions are namespaced so no
+  user can reverse another's tokens).
+- Users self-serve their own term lists at `/terms`; org terms stay in central
+  config. Edit central config and `kill -HUP <pid>` to hot-reload — no restart.
+- Point frontends at the shared NER host with `llm.url`.
+- Load-balancer health probe: `/readyz` (503 until the store is reachable).
+
+### Improving the local LLM at org scale
+On a workstation the NER model is deliberately small (`qwen2.5:3b-instruct`) so
+it cold-loads fast enough per request. A shared deployment removes that
+constraint — the model is loaded **once** on a warm GPU host and reused by every
+frontend — so you can run a much more accurate model. Recall (catching every
+entity) is the whole game here, and a bigger model is the largest single lever.
+
+- **Promote NER to a dedicated, warm, shared service.** Run Ollama on one GPU
+  host; set every frontend's `llm.url` to it. The model stays resident, so the
+  per-request cold-load cost that caps a workstation disappears.
+- **Use a larger model, or an ensemble.** A 7–8B model catches names and orgs
+  the 3B misses. An ensemble takes the *union* of several models' detections for
+  still-higher recall:
+  ```yaml
+  llm:
+    models: [qwen2.5:7b-instruct, llama3.1:8b]   # union of detections
+    keep_alive: -1          # keep models resident (never unload)
+  ```
+  Latency is the **sum** of the models, so an ensemble is only practical when
+  warm and shared, never per-request on a cold box. Budget ~8–16 GB VRAM for a
+  single 7–8B model and more for an ensemble; size the GPU host accordingly.
+- **Keep models resident** with `llm.keep_alive` (seconds, or `-1` for forever)
+  so no request pays a load.
+- **Tune for your data.** Expand `llm.entity_types` with types that matter to
+  you, adjust the NER `llm.prompt`, and — the highest-leverage deterministic
+  backstop — grow `anonymizer.name_gazetteer` from your directory (HR / Active
+  Directory export) so known employee and client names are caught even when the
+  model misses them. The known-value sweep then propagates any single catch
+  across the rest of the session.
+- **Queue + health.** Put a request queue in front of the shared NER service and
+  gate frontends on `/readyz` so a replica whose NER is cold or down is pulled
+  from rotation rather than failing sends.
 
 ---
 
