@@ -485,6 +485,11 @@ Add its name to `pipeline:` in config. For reversible redaction, use
 `aiproxy/processors/tokens.py`. Scope every stored mapping by
 `ctx.session_id`.
 
+> **Contributing to aiproxy itself?** The developer guide
+> [`DEVELOPING.md`](DEVELOPING.md) covers the architecture internals, the
+> `Document`/`Processor`/`Store` abstractions, how to make common changes, the
+> tag-based release flow, and the PR workflow and checklist.
+
 ### Drop-in plugins (no code edit)
 For an organization, a reviewed processor can be loaded without editing
 `registry.py` — dropped as a file or installed as a pip package — and enabled

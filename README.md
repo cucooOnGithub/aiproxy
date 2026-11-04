@@ -129,6 +129,13 @@ constraint and can run a far more accurate model:
   and grow the `anonymizer.name_gazetteer` from your directory (HR/AD) for
   deterministic recall the model alone would miss.
 
+## Contributing
+Developers: [`docs/DEVELOPING.md`](docs/DEVELOPING.md) explains the
+architecture, the `Document`/`Processor`/`Store` abstractions, how to make
+common changes, the SemVer/tag release flow, and the PR workflow and checklist.
+Shipping a custom redaction filter without touching core?
+[`docs/WRITING_A_PROCESSOR.md`](docs/WRITING_A_PROCESSOR.md).
+
 ## Status
 Working, 97 passing tests. Not yet smoke-tested against live providers
 except the local echo round-trip below.
