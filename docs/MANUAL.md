@@ -156,7 +156,7 @@ Key config fields (full list in `config.example.yaml`):
 | `listen` | host/port aiproxy binds to |
 | `upstreams.<provider>.base_url` | real API aiproxy forwards to (override with env `AIPROXY_UPSTREAM_<PROVIDER>`, e.g. `AIPROXY_UPSTREAM_ANTHROPIC`; env wins and can add a provider) |
 | `llm.url` / `llm.model` | local Ollama endpoint + model for NER |
-| `llm.entity_types` | entity labels the model may return; enum-constrains the schema (default `PERSON, ORG, LOCATION, EMAIL, PHONE`). Add a custom type's action under `anonymizer.entities` too |
+| `llm.entity_types` | entity labels the model may return; enum-constrains the schema (default `PERSON, ORG, LOCATION, EMAIL, PHONE`). Add a custom type's action under `anonymizer.entities` too. Tip: drop `PHONE` here and let `secrets_regex` own phone numbers — the deterministic regex (digit-count validated) is far more reliable than the small model, which mislabels version/filename strings like `v2` as PHONE |
 | `llm.prompt` | override the NER prompt; must contain `{text}`, optional `{types}` filled from `entity_types` |
 | `llm.cache_ttl` | seconds to keep in-memory NER results (`null` = forever) |
 | `llm.timeout` | seconds per NER request (default 60; model-load counts toward it) |
@@ -170,8 +170,11 @@ Key config fields (full list in `config.example.yaml`):
 | `scope.skip_regexes` | same as `skip_prefixes` but the block is protected when any regex matches it (`re.search`, DOTALL); for operational blocks not pinned to the start |
 | `anonymizer.entities` | per-type action: `anonymize` / `redact` / `ignore` |
 | `anonymizer.allowlist` | strings never redacted |
-| `anonymizer.denylist` | strings always redacted (exact full-string match) |
-| `anonymizer.name_gazetteer` | path to a file of known name **parts** (one per line, given names + surnames). Adjacent capitalized tokens whose lowercase form is in the file are joined into one PERSON (`Maria` + `Silva` → `Maria Silva`) and tokenized, even when the LLM misses them. Applies to plain text and Office docs. Blank/omitted = off |
+| `anonymizer.denylist` | strings always redacted **irreversibly** (replaced with `[REDACTED]`, never restored); substring match |
+| `anonymizer.always_tokenize` | strings always masked **reversibly** (a `⟦TERM_n⟧` token, restored on the response) regardless of the entity action map; substring match. Use for a known-sensitive value that must be hidden from upstream yet still appear in Claude's output (e.g. a client name in a document Claude generates). The deterministic, LLM-independent guarantee for known strings |
+| `anonymizer.known_value_sweep` | re-mask any value already tokenized earlier in the session in every later block, even when the NER misses it there (default `true`). Closes the "caught once, leaked later" recall gap; reuses each value's existing token |
+| `anonymizer.known_value_sweep_min_len` | shortest value the sweep will re-mask (default `4`), to avoid pathological substring matches on very short strings |
+| `anonymizer.name_gazetteer` | path to a file of known name **parts** (one per line, given names + surnames). Known parts are joined into one PERSON across spaces **and** `.`/`_`/`-` separators, and an uppercase initial before a known surname counts (`Maria Silva`, `john.rivera`, `john_rivera`, `J. Rivera`) — matched case-insensitively, so it also catches a lowercase dotted username inside a file path or URL. Precision rests on the curated list. Blank/omitted = off |
 | `anonymizer.name_gazetteer_min_parts` | shortest run of adjacent known parts that counts as a name (default `1`; set `2` to mask only multi-part names and avoid masking a lone first name that doubles as a common word) |
 | `store.encrypt` | encrypt originals at rest (needs `AIPROXY_STORE_KEY`) |
 | `redaction_log.debug` | also log the original (plaintext) message text alongside the redacted version — real PII on disk; leave `false` outside a trusted env |
@@ -341,7 +344,7 @@ Add its name to `pipeline:` in config. For reversible redaction, use
 | Symptom | Likely cause / fix |
 |---------|--------------------|
 | `NER failed, blocking send` | Ollama not running / wrong `llm.url`. Start `ollama serve`. |
-| Names still reaching upstream | LLM missed them → add to `denylist`; run `/dryrun` to verify. |
+| Names still reaching upstream | the LLM missed them (recall). For a known fixed string use `always_tokenize` (reversible) or `denylist` (irreversible); for people's names add the parts to `name_gazetteer`. The `known_value_sweep` then propagates any single catch across the rest of the session. Run `/dryrun` to verify. |
 | `AIPROXY_STORE_KEY not set` | export the key, or set `store.encrypt: false` (dev only). |
 | `tesseract not found` | install the Tesseract binary (§2). |
 | Slow responses | NER + OCR are local-compute heavy; results cache by text hash. |

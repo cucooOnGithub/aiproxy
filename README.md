@@ -61,7 +61,7 @@ python -m aiproxy serve --config config.yaml
 ```
 
 ## Status
-Working, 48 passing tests. Not yet smoke-tested against live providers
+Working, 60 passing tests. Not yet smoke-tested against live providers
 except the local echo round-trip below.
 
 - **Providers**: Anthropic (`/v1/messages`) and OpenAI
@@ -73,9 +73,15 @@ except the local echo round-trip below.
   SQLite store. Configurable model, prompt, and entity types. Ensemble
   (`MultiNER`, union of several models) or a single model; `keep_alive`,
   cache TTL, and startup pre-warm for VRAM-tight boxes. Deterministic
-  backstops: `allowlist`/`denylist` and a name gazetteer
-  (`anonymizer.name_gazetteer`) that joins adjacent known name-parts the
-  small model misses.
+  backstops (recall doesn't depend on the LLM): `allowlist`; `denylist`
+  (irreversible `[REDACTED]`); `always_tokenize` (known strings masked
+  **reversibly**, hidden upstream but restored in Claude's output — e.g. a
+  client name that must still appear in generated documents); a name gazetteer
+  (`anonymizer.name_gazetteer`) that joins known name-parts across spaces,
+  dots, underscores and hyphens, catching `john.rivera` and `J. Rivera`
+  even inside a path; and a **known-value sweep** that re-masks any value
+  tokenized once in a session across every later block, so a value the NER
+  catches inconsistently never leaks later.
 - **Archive/cache**: optional `archive.dir` keeps redacted documents on disk
   (named by a hash of the original, deduped) and doubles as a document cache
   that skips re-running the LLM/OCR on a re-presented file.
