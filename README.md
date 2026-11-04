@@ -13,9 +13,13 @@ AI tool ──▶ aiproxy ──(redacted)──▶ Anthropic
 ```
 
 - Reversible anonymization: originals ↔ tokens kept in a local encrypted store.
-- One `Processor` interface — drop in your own filters.
+- One `Processor` interface — drop in your own filters (or reviewed [plugins](docs/WRITING_A_PROCESSOR.md)).
 - Ships: `secrets_regex`, `anonymizer` (local-LLM NER), `image_redactor`, `logger`.
 - `/dryrun` endpoint to preview redactions before trusting it.
+- Scales to a shared org service: per-user identity + isolation, self-service
+  term lists (`/terms`), SQLite **or** Postgres store, config hot-reload
+  (`SIGHUP`), secrets-manager key sourcing, `/readyz`. See
+  [`docs/ORG_DEPLOYMENT.md`](docs/ORG_DEPLOYMENT.md).
 
 Full install + usage: [`docs/MANUAL.md`](docs/MANUAL.md).
 

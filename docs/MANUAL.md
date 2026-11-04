@@ -202,7 +202,9 @@ python -m aiproxy serve --config config.yaml
 # listening on http://127.0.0.1:8088   (per listen.port)
 ```
 
-Health check: `curl http://127.0.0.1:8080/healthz`
+Health check: `curl http://127.0.0.1:8080/healthz` (liveness).
+Readiness: `curl http://127.0.0.1:8080/readyz` — 200 when the store is
+reachable, 503 otherwise (use it as the load-balancer probe).
 
 ### Dashboard
 `http://127.0.0.1:8080/dashboard` — live counts (auto-refresh): requests,
@@ -271,6 +273,47 @@ python -m aiproxy purge --config config.yaml --session <session-id>
 Back up `map.db` **and** `AIPROXY_STORE_KEY` together, or treat both as
 ephemeral — one without the other is useless.
 
+### Store backend
+`store.backend` is `sqlite` (default, single-box) or `postgres` (shared,
+multi-writer — for several proxy replicas behind a load balancer). Postgres
+needs `store.dsn` and the `psycopg` package (`pip install 'psycopg[binary]'`).
+Both backends encrypt originals at rest with the same key.
+
+### Where the at-rest key comes from
+`store.key_source` is `env` (default — `AIPROXY_STORE_KEY`), `file`
+(`key_path`, a mounted secret) or `command` (`key_command`, shell out to a
+secrets manager / KMS CLI; its stdout is the key). This keeps no long-lived
+secret in the config file. Key rotation and per-tenant keys:
+[`docs/KEY_MANAGEMENT.md`](KEY_MANAGEMENT.md).
+
+---
+
+## 5b. Multi-user / organization deployment
+
+For a shared proxy owned by IT/security with many users, aiproxy adds identity,
+per-user term self-service, hot-reload and scale-out. Full design and rollout
+sequencing: [`docs/ORG_DEPLOYMENT.md`](ORG_DEPLOYMENT.md). The moving parts:
+
+- **Identity** (`identity.source`): `anonymous` (default, single namespace),
+  `api_key` (map an inbound key → `user_id` via `identity.keys`), or `header`
+  (trust a signed identity header from an SSO/OIDC gateway in front). Mappings
+  are isolated per user — one user can never reverse another's tokens.
+- **Per-user terms** (Phase 3): each user manages their **own**
+  `always_tokenize`/`denylist` strings at `GET/POST/DELETE /api/terms` or the
+  `http://127.0.0.1:8080/terms` page. They are additive and merge on top of the
+  org lists in config; a user can never weaken org coverage. Added terms take
+  effect within `anonymizer.user_terms_ttl` seconds, no restart.
+- **Hot-reload**: edit central config and send `SIGHUP`
+  (`kill -HUP <pid>`) — the pipeline and upstreams swap in place without
+  dropping the store. Invalid config is rejected and the running config kept
+  (fail closed).
+- **Scale-out**: `store.backend: postgres` lets N stateless frontends share one
+  store; `/readyz` (503 until the store is reachable) is the load-balancer
+  probe. Per-user request counts appear in `/metrics`.
+- **Hardening**: keep `mode: observe`, `redaction_log.debug` and `log_all` off
+  in production — they leak real data upstream / to disk and now log a loud
+  warning at startup when set.
+
 ---
 
 ## 6. Writing a custom processor
@@ -297,13 +340,21 @@ class MyFilter(Processor):
 Register it in `aiproxy/pipeline/registry.py`:
 ```python
 from aiproxy.processors.my_filter import MyFilter
-REGISTRY[MyFilter.name] = MyFilter
+BUILTINS[MyFilter.name] = MyFilter
 ```
 
 Add its name to `pipeline:` in config. For reversible redaction, use
 `ctx.store.put/token_for/original_for` and the token helpers in
 `aiproxy/processors/tokens.py`. Scope every stored mapping by
 `ctx.session_id`.
+
+### Drop-in plugins (no code edit)
+For an organization, a reviewed processor can be loaded without editing
+`registry.py` — dropped as a file or installed as a pip package — and enabled
+with a one-line `pipeline:` change. This **executes code with full proxy
+privileges**, so it is an admin path (default off), gated by review,
+name-collision refusal and audit logging. Full workflow and the `plugins:`
+config block: [`docs/WRITING_A_PROCESSOR.md`](WRITING_A_PROCESSOR.md).
 
 ---
 
