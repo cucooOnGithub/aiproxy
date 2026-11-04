@@ -21,6 +21,7 @@ from aiproxy.document import Document, Part, PartKind
 from aiproxy.llm.ollama_ner import build_ner
 from aiproxy.metrics import METRICS
 from aiproxy.pipeline.base import Processor, SessionContext
+from aiproxy.processors.secrets_regex import _PATTERNS, _accept
 
 
 class ImageRedactor(Processor):
@@ -33,6 +34,12 @@ class ImageRedactor(Processor):
         self.ner = build_ner(llm)
         self.max_pages = config.get("max_pages", 20)
         self.dpi = config.get("dpi", 200)  # raster resolution for scanned pages
+        # Deterministic regex backstop over OCR text: the small NER model
+        # misses emails, card numbers, IBANs and API keys in images/PDFs, and
+        # (unlike the plain-text path) secrets_regex never sees OCR'd content.
+        # So we run the same fixed-shape patterns here and mask any OCR word
+        # that falls inside a match. Default: all patterns (incl. CREDITCARD).
+        self.ocr_regex = config.get("ocr_regex", list(_PATTERNS))
 
     def process_request(self, doc: Document, ctx: SessionContext) -> Document:
         arch = getattr(ctx, "archive", None)
@@ -74,9 +81,31 @@ class ImageRedactor(Processor):
 
         img = Image.open(io.BytesIO(data)).convert("RGB")
         ocr = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
-        words = [w for w in ocr["text"] if w.strip()]
-        flagged = {e.text for e in self.ner.detect(" ".join(words))}
+
+        # Join the non-empty OCR words into one string (the NER sees this), and
+        # remember each word's character span in that string so a regex match
+        # can be mapped back to the exact word boxes it covers.
+        joined_pieces: list[str] = []
+        spans: dict[int, tuple[int, int]] = {}
+        pos = 0
+        for i, w in enumerate(ocr["text"]):
+            if not w.strip():
+                continue
+            start = pos
+            joined_pieces.append(w)
+            pos += len(w)
+            spans[i] = (start, pos)
+            pos += 1  # the single space that `" ".join` inserts after
+        joined = " ".join(joined_pieces)
+
+        # 1) NER entities -> per-word flag set (existing behavior).
+        flagged = {e.text for e in self.ner.detect(joined)}
         flag_words = self._flag_word_set(flagged)
+
+        # 2) Deterministic regex backstop: any OCR word overlapping an
+        #    email/phone/IBAN/API-key/card match is masked, even when OCR split
+        #    the value across word boxes (e.g. "+351 912 884 573").
+        regex_idx = self._regex_flagged_indices(joined, spans, ocr["text"])
 
         draw = ImageDraw.Draw(img)
         conf = ocr.get("conf", [])
@@ -89,7 +118,7 @@ class ImageRedactor(Processor):
                     continue
             except (ValueError, TypeError):
                 pass
-            if self._norm(word) in flag_words:
+            if self._norm(word) in flag_words or i in regex_idx:
                 x, y = ocr["left"][i], ocr["top"][i]
                 w, h = ocr["width"][i], ocr["height"][i]
                 draw.rectangle([x, y, x + w, y + h], fill="black")
@@ -97,6 +126,46 @@ class ImageRedactor(Processor):
         out = io.BytesIO()
         img.save(out, format="PNG")
         return out.getvalue()
+
+    def _regex_flagged_indices(self, joined: str,
+                               spans: dict[int, tuple[int, int]],
+                               texts: list[str] | None = None) -> set[int]:
+        """Word indices to mask from the deterministic backstop.
+
+        Two sources:
+          * a pattern match over the joined OCR text (emails/phones/IBANs/
+            API keys/cards), mapped back to every word box it overlaps;
+          * an '@' heuristic for emails OCR split around the '@' with spaces
+            (e.g. "theo.marchetti @ domain.example"), which the strict email
+            regex can't match — flag the '@' word and its immediate neighbors.
+        One-way image masking, so over-masking a neighbor is acceptable; a
+        leaked address is not.
+        """
+        idx: set[int] = set()
+        for etype in self.ocr_regex:
+            pat = _PATTERNS.get(etype)
+            if not pat:
+                continue
+            for m in pat.finditer(joined):
+                if not _accept(etype, m.group(0)):
+                    continue
+                s, e = m.span()
+                for i, (ws, we) in spans.items():
+                    if ws < e and we > s:  # word overlaps the match
+                        idx.add(i)
+
+        if texts is not None and "EMAIL" in self.ocr_regex:
+            order = sorted(spans)  # ascending non-empty word indices
+            pos = {wi: k for k, wi in enumerate(order)}
+            for wi in order:
+                if "@" in (texts[wi] or ""):
+                    k = pos[wi]
+                    idx.add(wi)
+                    if k > 0:
+                        idx.add(order[k - 1])
+                    if k + 1 < len(order):
+                        idx.add(order[k + 1])
+        return idx
 
     @staticmethod
     def _norm(s: str) -> str:

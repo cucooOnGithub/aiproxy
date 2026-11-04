@@ -22,11 +22,28 @@ _PHONE_MIN_DIGITS = 9
 _PHONE_MAX_DIGITS = 15
 
 
+def _luhn_ok(digits: str) -> bool:
+    """Luhn checksum — rejects random digit runs that merely look card-shaped."""
+    total, alt = 0, False
+    for ch in reversed(digits):
+        d = ord(ch) - 48
+        if alt:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+        alt = not alt
+    return total % 10 == 0
+
+
 def _accept(etype: str, match: str) -> bool:
     """Reject regex matches that fit the shape but aren't really the thing."""
     if etype == "PHONE":
         d = sum(c.isdigit() for c in match)
         return _PHONE_MIN_DIGITS <= d <= _PHONE_MAX_DIGITS
+    if etype == "CREDITCARD":
+        digits = "".join(c for c in match if c.isdigit())
+        return 13 <= len(digits) <= 19 and _luhn_ok(digits)
     return True
 
 
@@ -35,6 +52,9 @@ _PATTERNS: dict[str, re.Pattern] = {
     "APIKEY": re.compile(r"\b(?:sk|pk|ghp|xox[baprs])[-_][A-Za-z0-9]{16,}\b"),
     "IBAN": re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b"),
     "PHONE": re.compile(r"(?<!\w)\+?\d[\d\s().-]{7,}\d(?!\w)"),
+    # 13-19 digit runs with optional space/dash grouping; Luhn-validated in
+    # _accept so plain long numbers aren't masked as cards.
+    "CREDITCARD": re.compile(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)"),
 }
 
 
