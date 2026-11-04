@@ -1,6 +1,9 @@
 [project]
 name = "aiproxy"
-version = "0.1.0"
+# Version is derived from the latest git tag (vX.Y.Z) by setuptools-scm — see
+# [tool.setuptools_scm] below. Tag a release with `git tag vX.Y.Z`; builds
+# between tags get a dev version like 0.2.1.dev4+g<sha>.
+dynamic = ["version"]
 description = "Anonymizing reverse proxy for LLM APIs"
 license = "PolyForm-Noncommercial-1.0.0"
 license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md"]
@@ -34,11 +37,16 @@ build = [
 aiproxy = "aiproxy.__main__:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["aiproxy*"]
+
+[tool.setuptools_scm]
+# Write the resolved version into a generated file (git-ignored) so it is
+# available to the installed package and bundled into the PyInstaller binary.
+version_file = "aiproxy/_version.py"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

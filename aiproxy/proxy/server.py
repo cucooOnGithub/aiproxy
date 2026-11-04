@@ -172,7 +172,8 @@ def create_app(cfg: dict, config_path: str | None = None) -> FastAPI:
 
     @app.get("/healthz")
     async def healthz():
-        return {"ok": True}
+        from aiproxy import __version__
+        return {"ok": True, "version": __version__}
 
     @app.get("/readyz")
     async def readyz():

@@ -13,6 +13,9 @@ import sys
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="aiproxy")
+    from aiproxy import __version__
+    ap.add_argument("--version", action="version",
+                    version=f"aiproxy {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("serve", help="run the proxy")
