@@ -88,9 +88,10 @@ class Anonymizer(Processor):
         return out
 
     def _seq(self, ctx: SessionContext) -> int:
-        n = getattr(ctx, "_seq_counter", 0) + 1
-        ctx._seq_counter = n  # type: ignore[attr-defined]
-        return n
+        # Per-session, persisted in the store: a SessionContext is recreated
+        # per request, so a ctx-local counter restarts at 1 each request and
+        # reissues the same token number to different originals (collision).
+        return ctx.store.next_seq(ctx.session_id)
 
     def _action(self, etype: str) -> str:
         return self.actions.get(etype, "ignore")

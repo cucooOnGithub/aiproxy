@@ -44,3 +44,34 @@ def test_same_value_same_token():
     doc = Document(parts=[Part(PartKind.TEXT, text="a@x.com and a@x.com")])
     out = proc.process_request(doc, ctx)
     assert out.parts[0].text.count("⟦EMAIL_1⟧") == 2
+
+
+def test_tokens_dont_collide_across_requests():
+    """Each HTTP request builds a fresh SessionContext for the same session.
+    The token sequence must keep counting across requests, not restart at 1,
+    or a second original would be reissued ⟦EMAIL_1⟧ and clobber the first on
+    restore. Regression for the per-request _seq_counter collision bug.
+    """
+    db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+    store = SqliteStore(db, Cipher.null())
+    proc = SecretsRegex({})
+    pipe = Pipeline([proc])
+
+    # Request 1 — new ctx, new email.
+    ctx1 = SessionContext("sess", store, {})
+    r1 = pipe.run_request(
+        Document(parts=[Part(PartKind.TEXT, text="first alice@x.com")]), ctx1)
+    tok1 = r1.parts[0].text.split("first ")[1].strip()
+    assert tok1 == "⟦EMAIL_1⟧"
+
+    # Request 2 — fresh ctx (same session), different email.
+    ctx2 = SessionContext("sess", store, {})
+    r2 = pipe.run_request(
+        Document(parts=[Part(PartKind.TEXT, text="second bob@y.com")]), ctx2)
+    tok2 = r2.parts[0].text.split("second ")[1].strip()
+    assert tok2 == "⟦EMAIL_2⟧", f"expected a fresh number, got {tok2}"
+    assert tok1 != tok2
+
+    # Both tokens restore to their own original — no clobbering.
+    assert store.original_for("sess", "⟦EMAIL_1⟧") == "alice@x.com"
+    assert store.original_for("sess", "⟦EMAIL_2⟧") == "bob@y.com"

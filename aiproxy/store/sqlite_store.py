@@ -9,6 +9,7 @@ without this store, so losing it = permanent anonymization.
 from __future__ import annotations
 
 import hashlib
+import re
 import sqlite3
 import threading
 from pathlib import Path
@@ -41,7 +42,20 @@ CREATE TABLE IF NOT EXISTS redaction_cache (
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (session_id, stage, text_hash)
 );
+
+-- Monotonic token sequence per session. The token number MUST be stable and
+-- unique across a whole session, not per-request: a SessionContext is created
+-- fresh for every request, so a request-local counter restarts at 1 each time
+-- and reissues e.g. PERSON_1 to a different original, colliding in `mappings`
+-- (PK session_id+token, INSERT OR IGNORE) and corrupting restoration.
+CREATE TABLE IF NOT EXISTS seq_counters (
+    session_id  TEXT PRIMARY KEY,
+    n           INTEGER NOT NULL
+);
 """
+
+# Trailing "_<number>" in a token like ⟦PERSON_12⟧ (entity types carry no digits).
+_TOKEN_SEQ_RE = re.compile(r"_(\d+)\D*$")
 
 
 class SqliteStore:
@@ -63,6 +77,44 @@ class SqliteStore:
                 (session_id, token, enc, entity_type),
             )
             self._conn.commit()
+
+    def next_seq(self, session_id: str) -> int:
+        """Return the next token sequence number for a session, persisted and
+        monotonic across requests so tokens never collide. Seeds from any
+        tokens already stored for the session (a store written before this
+        counter existed) so an existing number is never reissued.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT n FROM seq_counters WHERE session_id=?", (session_id,)
+            ).fetchone()
+            if row is None:
+                n = self._max_token_seq(session_id) + 1
+                self._conn.execute(
+                    "INSERT INTO seq_counters (session_id, n) VALUES (?,?)",
+                    (session_id, n),
+                )
+            else:
+                n = row[0] + 1
+                self._conn.execute(
+                    "UPDATE seq_counters SET n=? WHERE session_id=?",
+                    (n, session_id),
+                )
+            self._conn.commit()
+            return n
+
+    def _max_token_seq(self, session_id: str) -> int:
+        """Highest "_<n>" across existing tokens for a session (0 if none).
+        Called under self._lock."""
+        rows = self._conn.execute(
+            "SELECT token FROM mappings WHERE session_id=?", (session_id,)
+        ).fetchall()
+        mx = 0
+        for (tok,) in rows:
+            m = _TOKEN_SEQ_RE.search(tok)
+            if m:
+                mx = max(mx, int(m.group(1)))
+        return mx
 
     def token_for(self, session_id: str, original: str, entity_type: str) -> str | None:
         """Reverse lookup: has this original already been tokenized?
@@ -97,6 +149,9 @@ class SqliteStore:
             )
             self._conn.execute(
                 "DELETE FROM redaction_cache WHERE session_id=?", (session_id,)
+            )
+            self._conn.execute(
+                "DELETE FROM seq_counters WHERE session_id=?", (session_id,)
             )
             self._conn.commit()
             return cur.rowcount

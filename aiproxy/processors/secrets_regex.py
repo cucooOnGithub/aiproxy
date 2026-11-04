@@ -27,10 +27,11 @@ class SecretsRegex(Processor):
     handles = frozenset({PartKind.TEXT})
 
     def _seq(self, ctx: SessionContext) -> int:
-        # Monotonic per-session counter kept on the context object.
-        n = getattr(ctx, "_seq_counter", 0) + 1
-        ctx._seq_counter = n  # type: ignore[attr-defined]
-        return n
+        # Monotonic per-session counter, persisted in the store and shared with
+        # the anonymizer. A ctx-local counter would restart each request (ctx
+        # is recreated per request) and reissue the same token to different
+        # originals, colliding in `mappings` and corrupting restoration.
+        return ctx.store.next_seq(ctx.session_id)
 
     def process_request(self, doc: Document, ctx: SessionContext) -> Document:
         enabled = self.config.get("patterns") or list(_PATTERNS)
