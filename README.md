@@ -1,5 +1,11 @@
 # aiproxy
 
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support%20the%20project-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/cucoo)
+
+> aiproxy is free and keeps your data on your machine. If it saves you from
+> leaking PII to an LLM provider, **[buy me a coffee ☕](https://buymeacoffee.com/cucoo)** —
+> it funds the time that keeps the project maintained.
+
 Anonymizing reverse proxy for LLM APIs. Point Claude Code (or any AI tool)
 at aiproxy; it scrubs people/company names and other sensitive content with
 a **local** LLM before forwarding to Anthropic, then restores the originals
@@ -99,6 +105,9 @@ python -m aiproxy serve  --config config.yaml
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8080  # match listen.port
 ```
 
+Up and running? If aiproxy is now keeping your data private, consider
+[**buying me a coffee ☕**](https://buymeacoffee.com/cucoo) to support it.
+
 <details><summary>Manual quick start (skip the installer)</summary>
 
 ```bash
@@ -150,6 +159,9 @@ architecture, the `Document`/`Processor`/`Store` abstractions, how to make
 common changes, the SemVer/tag release flow, and the PR workflow and checklist.
 Shipping a custom redaction filter without touching core?
 [`docs/WRITING_A_PROCESSOR.md`](docs/WRITING_A_PROCESSOR.md).
+
+Not a coder? You can still help the project a lot by
+[**buying me a coffee ☕**](https://buymeacoffee.com/cucoo) or sharing it.
 
 ## Status
 Working, 97 passing tests. Not yet smoke-tested against live providers
@@ -209,11 +221,18 @@ hosted LLM providers while still using AI tools. Business and compliance
 rationale (GDPR/minimization, pseudonymization, honest limits): see
 [docs/BUSINESS_JUSTIFICATION.md](docs/BUSINESS_JUSTIFICATION.md).
 
-## Support
+## Support this project ☕
 
-If aiproxy helps you, you can
-[buy me a coffee](https://www.buymeacoffee.com/YOUR_HANDLE) (replace
-`YOUR_HANDLE` with your Buy Me a Coffee username).
+aiproxy is built and maintained in the open, for free, by one person. There's
+no company behind it and no telemetry — your data never leaves your machine, so
+the project earns nothing from using it. If it's useful to you or your team,
+please consider chipping in:
+
+### → [**Buy me a coffee**](https://buymeacoffee.com/cucoo)
+
+Even a single coffee is real encouragement and directly funds new filters,
+better name recall, and keeping the docs and releases current. If your company
+relies on it, a few coffees (or sharing the project) goes a long way. Thank you.
 
 ## License
 

@@ -6,6 +6,9 @@ aiproxy scrubs sensitive content locally, forwards the redacted request
 upstream, and restores the originals in the reply — so the provider never
 sees the real values but you still read them.
 
+> Free and self-hosted. If it's useful to you, consider
+> [buying me a coffee ☕](https://buymeacoffee.com/cucoo) — see [§11](#11-support-this-project-).
+
 ---
 
 ## 1. What it does and does not do
@@ -592,3 +595,17 @@ no copyleft dependencies — PyMuPDF (AGPL-3.0) was replaced with pypdfium2
 (BSD/Apache) so the whole service can be offered under noncommercial-only
 terms. Local model weights (e.g. Llama 3.2, Qwen2.5) are licensed by their
 publishers and are the operator's responsibility; aiproxy bundles no weights.
+
+---
+
+## 11. Support this project ☕
+
+aiproxy is free, open, and keeps your data on your own machine — the project
+earns nothing from your using it. If it saves you from leaking PII to an LLM
+provider, please consider supporting continued development:
+
+**→ [Buy me a coffee](https://buymeacoffee.com/cucoo)**
+
+Even one coffee is genuine encouragement and funds new filters, better name
+recall, and keeping these docs current. If your team depends on aiproxy, a few
+coffees — or just sharing it — goes a long way. Thank you.

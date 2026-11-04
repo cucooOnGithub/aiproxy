@@ -223,3 +223,12 @@ merge.
 Thanks for contributing — the whole point of the project is that sensitive data
 never leaks, so careful review of the detection and forwarding paths is a
 feature, not friction.
+
+---
+
+## 7. Support ☕
+
+Code isn't the only way to help. If aiproxy is useful to you, consider
+[**buying me a coffee**](https://buymeacoffee.com/cucoo) — it funds the time
+that keeps the project maintained. Sharing it with people who send sensitive
+data to LLMs helps just as much.
