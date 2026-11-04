@@ -116,6 +116,13 @@ class Anonymizer(Processor):
             # (e.g. the NER model flagging ⟦EMAIL_1⟧ as an email).
             if TOKEN_RE.search(ent.text):
                 continue
+            # The NER model sometimes returns an entity string that is not
+            # literally in the text (a normalized/garbled echo of an existing
+            # token, e.g. "@@PHONE_1@@"). Replacing it would be a no-op, so
+            # skip it entirely - otherwise we mint a token and store a mapping
+            # that never appears in the output, polluting the store and counts.
+            if ent.text not in text:
+                continue
             action = "redact" if ent.text in self.deny else self._action(ent.type)
             if action == "ignore":
                 continue

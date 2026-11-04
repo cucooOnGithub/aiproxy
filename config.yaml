@@ -87,9 +87,22 @@ scope:
     - "You are Claude Code"
     - "Direct output style is active"
     - "[SUGGESTION MODE"
+    # Claude Code injects a skill body as a plain user turn (no tag), opening
+    # with this line - operational, must pass through verbatim.
+    - "Base directory for this skill:"
   # Same, but protect the block when any of these regexes matches it
   # (re.search, DOTALL) - for operational blocks not pinned to the start.
-  skip_regexes: []
+  skip_regexes:
+    # Skill bodies reference the synced-skills path even when they don't start
+    # with the line above (continuations, differently-framed skills).
+    - "\\.claude/skills/"
+    # Voice-daemon operational nudges/recaps injected as user/system turns
+    # (not the top-level system prompt, so redact_system does not cover them).
+    - "hasn't heard from you in a while"
+    - "stepped away and coming back\\. Recap in under"
+    # Output-style banner in any mode (Direct/Concise/Explanatory/...), which
+    # Claude Code injects as operational text, not a real turn.
+    - "output style (is )?active"
 
 secrets_regex:
   patterns: [EMAIL, APIKEY, IBAN, PHONE]
