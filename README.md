@@ -23,6 +23,32 @@ AI tool ──▶ aiproxy ──(redacted)──▶ Anthropic
 
 Full install + usage: [`docs/MANUAL.md`](docs/MANUAL.md).
 
+## Architecture
+The pipeline redacts on the way out and restores on the way in; the upstream
+API only ever sees tokens. Both directions share the encrypted store and the
+local NER model.
+
+```mermaid
+flowchart LR
+  C["AI client"] --> I["Ingress · identity<br/>resolve user_id<br/>session = user/raw"]
+  I --> P
+  subgraph P["Pipeline"]
+    direction TB
+    L["logger"] --> S["secrets_regex"] --> A["anonymizer · NER → ⟦TOKEN⟧"] --> IR["image_redactor"]
+  end
+  P -- "redacted + tokens" --> U["Upstream LLM<br/>(sees tokens only)"]
+  U -- "tokens" --> P
+  P -- "originals restored" --> C
+  A <-- "detect" --> N["Local NER (Ollama)"]
+  P <-- "put / token_for · cache · terms" --> ST[("Store · encrypted<br/>sqlite | postgres")]
+  K["Key source<br/>env | file | command"] -. "at-rest key" .-> ST
+```
+
+Scaled to a shared org service it runs stateless frontends behind a load
+balancer over a shared Postgres store and NER service — diagrams and design in
+[`docs/MANUAL.md#1b-architecture`](docs/MANUAL.md#1b-architecture) and
+[`docs/ORG_DEPLOYMENT.md`](docs/ORG_DEPLOYMENT.md).
+
 ## Install (one command)
 The installer sets up the venv + deps, Ollama (and starts it), Tesseract,
 the NER models your config needs, a store key, and `config.yaml`.

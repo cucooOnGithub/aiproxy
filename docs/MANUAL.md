@@ -36,6 +36,62 @@ an attacker who already has your local machine or the mapping store.
 
 ---
 
+## 1b. Architecture
+
+### Request / response flow (one replica)
+The pipeline redacts on the way out and restores on the way in. The upstream
+API only ever sees tokens; real values never cross the trust boundary. Both
+directions share the encrypted store and the local NER model.
+
+```mermaid
+flowchart LR
+  C["AI client<br/>(Claude Code / SDK)"] --> I["Ingress · identity<br/>resolve user_id<br/>session = user/raw"]
+  I --> P
+  subgraph P["Pipeline"]
+    direction TB
+    L["logger"] --> S["secrets_regex"] --> A["anonymizer · NER → ⟦TOKEN⟧"] --> IR["image_redactor"]
+  end
+  P -- "redacted + tokens" --> U["Upstream LLM<br/>Anthropic / OpenAI<br/>(sees tokens only)"]
+  U -- "tokens" --> P
+  P -- "originals restored" --> C
+  A <-- "detect" --> N["Local NER<br/>Ollama + gazetteer<br/>+ known-value sweep"]
+  P <-- "put / token_for · cache · terms" --> ST[("Store · encrypted<br/>sqlite | postgres<br/>mappings · seq · cache · user_terms")]
+  K["Key source<br/>env | file | command"] -. "at-rest key" .-> ST
+```
+
+Identity resolution namespaces the session as `user_id/raw` so one user can
+never reverse another's tokens. The anonymizer tokenizes reversibly; only
+`denylist` hits are one-way `[REDACTED]`. The response path runs the same
+processors in reverse.
+
+### Organization deployment (scale-out)
+Central config owned by IT/security; users self-serve terms, never config or
+code. Frontends are stateless behind a load balancer once state lives in a
+shared Postgres store and a warm shared NER service.
+
+```mermaid
+flowchart LR
+  Users["Users · AI tools"] --> GW["SSO / OIDC gateway<br/>injects signed x-auth-user"]
+  GW --> LB["Load balancer<br/>probe /readyz"]
+  LB --> F1 & F2 & F3
+  subgraph Frontends["Stateless aiproxy frontends · N replicas"]
+    F1["frontend"]
+    F2["frontend"]
+    F3["frontend"]
+  end
+  Frontends <-- "shared state" --> PG[("Postgres store<br/>encrypted · shared<br/>mappings · user_terms")]
+  Frontends <-- "NER" --> NER["NER service<br/>warm GPU · shared"]
+  SM["Secrets mgr / KMS"] -. "at-rest key" .-> PG
+  CFG["Central config · IT/security<br/>org terms · pipeline · plugins<br/>validated · SIGHUP hot-reload"] -. "SIGHUP" .-> Frontends
+  Users -. "/terms self-service (additive)" .-> Frontends
+```
+
+The critical path to multi-user is a shared store (Phase 1) + per-user
+identity (Phase 2) + the per-user term tier (Phase 3). Full design and
+sequencing: [`ORG_DEPLOYMENT.md`](ORG_DEPLOYMENT.md).
+
+---
+
 ## 2. Install
 
 Requires Python ≥ 3.11. The installer handles everything else (Ollama,
