@@ -89,7 +89,7 @@ operates. This logic lives in `Pipeline._mask` / `_unmask`.
 ## 2. Dev setup
 
 ```bash
-git clone <repo-url> aiproxy && cd aiproxy
+git clone https://github.com/cucooOnGithub/aiproxy.git aiproxy && cd aiproxy
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[media,dev]"      # core + image/PDF/Office + test deps
 ollama pull qwen2.5:3b-instruct    # the NER model (see config)

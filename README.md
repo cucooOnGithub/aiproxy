@@ -62,7 +62,7 @@ balancer over a shared Postgres store and NER service — diagrams and design in
 
 First get the code (needs `git` and Python ≥ 3.11):
 ```bash
-git clone <repo-url> aiproxy
+git clone https://github.com/cucooOnGithub/aiproxy.git aiproxy
 cd aiproxy
 ```
 

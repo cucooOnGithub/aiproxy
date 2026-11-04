@@ -135,7 +135,7 @@ key, config).
 ### Get the code
 Clone the repository (needs `git`); everything else is set up below.
 ```bash
-git clone <repo-url> aiproxy
+git clone https://github.com/cucooOnGithub/aiproxy.git aiproxy
 cd aiproxy
 ```
 
