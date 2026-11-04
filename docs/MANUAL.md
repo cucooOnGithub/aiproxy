@@ -132,6 +132,13 @@ so a GPU is the single biggest speed-up on a workstation.
 The installer handles everything beyond Python (Ollama, Tesseract, models,
 key, config).
 
+### Get the code
+Clone the repository (needs `git`); everything else is set up below.
+```bash
+git clone <repo-url> aiproxy
+cd aiproxy
+```
+
 ### Automatic (recommended)
 From the repo root:
 

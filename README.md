@@ -60,8 +60,14 @@ balancer over a shared Postgres store and NER service — diagrams and design in
 
 ## Install
 
-Two deployment shapes — pick the one that fits. Full detail for each is in the
-manual: [single workstation](docs/MANUAL.md#2-install--single-workstation) ·
+First get the code (needs `git` and Python ≥ 3.11):
+```bash
+git clone <repo-url> aiproxy
+cd aiproxy
+```
+
+Then pick a deployment shape. Full detail for each is in the manual:
+[single workstation](docs/MANUAL.md#2-install--single-workstation) ·
 [organization](docs/MANUAL.md#2b-install--organization).
 
 ### A · Single workstation
