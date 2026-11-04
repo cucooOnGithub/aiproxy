@@ -34,6 +34,22 @@ aiproxy protects against the *upstream provider* (and anyone reading
 upstream logs) seeing your sensitive data. It does **not** protect against
 an attacker who already has your local machine or the mapping store.
 
+### Use at your own risk — no warranty
+aiproxy is provided **as is**, without warranty or condition of any kind, and
+the authors accept **no liability** for any damages arising from its use — see
+the **No Liability** clause in [`LICENSE`](../LICENSE). In plain terms:
+
+- **Detection is not guaranteed.** The local LLM can miss an entity, so a real
+  value can still reach the upstream provider. aiproxy reduces risk; it does not
+  eliminate it. Run `fail_closed`, verify with `/dryrun`, and use the
+  deterministic backstops (allow/deny lists, `always_tokenize`, the gazetteer).
+- **You remain responsible** for validating that redaction is adequate for your
+  data, and for any legal/compliance obligations (e.g. GDPR) you have toward the
+  people whose data you process. The license governs only your relationship with
+  the authors, not your obligations to third parties.
+- **The mapping store is the de-anonymization key.** Losing control of it (and
+  its encryption key) reverses every redaction. Guard both.
+
 ---
 
 ## 1b. Architecture

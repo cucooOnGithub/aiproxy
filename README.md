@@ -23,6 +23,15 @@ AI tool ──▶ aiproxy ──(redacted)──▶ Anthropic
 
 Full install + usage: [`docs/MANUAL.md`](docs/MANUAL.md).
 
+> ⚠️ **Use at your own risk — no warranty.** aiproxy is provided *as is*,
+> without warranty of any kind (see the **No Liability** clause in
+> [`LICENSE`](LICENSE)). Detection is **not guaranteed**: a local LLM can miss
+> an entity, so a real value can still reach the upstream provider. You are
+> responsible for validating redaction for your own data and for any
+> obligations you have to the people whose data you process. Run it in
+> `fail_closed` mode, verify with `/dryrun`, and treat the mapping store as a
+> secret. See the [threat model](docs/MANUAL.md#threat-model).
+
 ## Architecture
 The pipeline redacts on the way out and restores on the way in; the upstream
 API only ever sees tokens. Both directions share the encrypted store and the
