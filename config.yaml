@@ -1,7 +1,7 @@
 # aiproxy configuration. Copy to config.yaml and edit.
 
 listen:
-  host: 127.0.0.1
+  host: 0.0.0.0     # all interfaces; restrict exposure via firewall (LAN only)
   port: 8088
 
 # Where redacted requests are forwarded. The proxy mimics each provider's
